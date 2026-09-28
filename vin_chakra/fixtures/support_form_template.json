@@ -39,7 +39,7 @@
     "fieldname": "custom_machine_type_list",
     "icon": "ticket",
     "label": null,
-    "reqd": 0,
+    "reqd": 1,
     "section": "Machine & Issue Details",
     "step": 2
    },
@@ -53,7 +53,7 @@
    }
   ],
   "is_default": 1,
-  "modified": "2026-09-25 15:47:50.702446",
+  "modified": "2026-09-28 10:31:05.383678",
   "name": "Default",
   "template_name": "Default"
  }

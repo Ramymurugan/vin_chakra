@@ -16,14 +16,14 @@ class Machinetypelist(Document):
 
 		machine_brand: DF.Link
 		machine_name: DF.Data | None
-		machine_problem: DF.Link
+		machine_problem: DF.Link | None
 		machine_quantity: DF.Int
 		machine_type: DF.Link
 		model_no: DF.Data | None
 		parent: DF.Data
 		parentfield: DF.Data
 		parenttype: DF.Data
-		purchase_year: DF.Literal["2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025", "2026"]
+		purchase_year: DF.Literal["", "2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025", "2026"]
 		purchased_at_scs: DF.Literal["", "Yes", "No"]
 	# end: auto-generated types
 
