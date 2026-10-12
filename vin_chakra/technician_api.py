@@ -928,7 +928,30 @@ def mark_day_attendance(log_type: str, latitude: float = None, longitude: float 
 		return {"status": "error", "message": "No active Employee found for current user."}
 	
 	employee_id = employees[0]
-	
+
+	# Enforce a valid IN/OUT transition based on the employee's actual last log today,
+	# so a stale client button (or a duplicate/retried request) can never record a
+	# state the employee isn't really in.
+	today_start = f"{frappe.utils.today()} 00:00:00"
+	today_end = f"{frappe.utils.today()} 23:59:59"
+	last_log = frappe.get_all(
+		"Employee Checkin",
+		filters={
+			"employee": employee_id,
+			"time": ["between", [today_start, today_end]]
+		},
+		fields=["log_type"],
+		order_by="time desc",
+		limit=1
+	)
+	current_state = last_log[0].log_type if last_log else "OUT"
+
+	if log_type == current_state:
+		if log_type == "IN":
+			return {"status": "error", "message": "You are already checked in for the day."}
+		else:
+			return {"status": "error", "message": "You are already checked out. Please check in first."}
+
 	# Determine device ID: use parameter or default to "Technician Portal"
 	effective_device_id = device_id.strip() if device_id and str(device_id).strip() else "Technician Portal"
 

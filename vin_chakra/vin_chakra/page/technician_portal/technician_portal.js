@@ -7,6 +7,7 @@ frappe.pages['technician-portal'].on_page_show = function(wrapper) {
         wrapper._dashboard.read_url_params();
         wrapper._dashboard.sync_ui_from_state();
         wrapper._dashboard.render_view_structure();
+        wrapper._dashboard.fetch_day_attendance_status();
         wrapper._dashboard.load_data();
     }
 };
