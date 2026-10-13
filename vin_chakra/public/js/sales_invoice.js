@@ -29,6 +29,8 @@ frappe.ui.form.on("Sales Invoice", {
 
 		if (!frm.is_new()) return;
 
+		_set_current_technician(frm);
+
 		let is_portal = sessionStorage.getItem("tp_inv_active") === "1";
 		if (!is_portal) return;
 
@@ -201,6 +203,24 @@ function _populate_machine_table(frm, machines) {
 
 	frm.refresh_field("custom_hd_ticket_machine_");
 	update_service_charges_from_machines(frm);
+}
+
+/**
+ * Fill custom_technician with the full name of the Employee linked to the logged-in user.
+ * The server sets and checks the same value on insert, so this is for display only.
+ * If no Employee or abbreviation is found, the server error is shown as a dialog.
+ */
+function _set_current_technician(frm) {
+	if (!frm.fields_dict.custom_technician || frm.doc.amended_from) return;
+	frappe.call({
+		method: "vin_chakra.vin_chakra.custom.sales_invoice.get_current_technician",
+		callback(r) {
+			let tech = r.message || {};
+			if (tech.employee_name && frm.doc.custom_technician !== tech.employee_name) {
+				frm.set_value("custom_technician", tech.employee_name);
+			}
+		}
+	});
 }
 
 /** Clear all session keys set by the technician portal invoice flow. */
