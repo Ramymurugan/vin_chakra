@@ -5,3 +5,4 @@
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
 vin_chakra.patches.seed_support_form_template
+vin_chakra.patches.remove_sales_invoice_custom_phone_number
