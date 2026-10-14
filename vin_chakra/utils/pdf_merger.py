@@ -18,7 +18,7 @@ def merge_machine_catalogs(original_pdf_bytes, doctype, name):
 
     doc = frappe.get_doc(doctype, name)
     catalog_urls = []
-    
+   
     # Collect all unique machine_catalog URLs from items
     for item in doc.get("items"):
         if item.get("machine_catalog"):

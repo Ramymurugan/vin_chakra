@@ -8,9 +8,8 @@ def patch_attach_print():
 
     orig_attach_print = frappe.attach_print
 
-    def custom_attach_print(doctype, name, file_name=None, print_format=None, style=None, html=None, doc=None, lang=None, print_letterhead=None):
-        result = orig_attach_print(doctype, name, file_name, print_format, style, html, doc, lang, print_letterhead)
-        
+    def custom_attach_print(doctype, name, print_format=None, letterhead=None, **kwargs):
+        result = orig_attach_print(doctype, name, print_format=print_format, letterhead=letterhead, **kwargs)
         if doctype == "Quotation" and result and result.get("fcontent"):
             try:
                 from vin_chakra.utils.pdf_merger import merge_machine_catalogs
@@ -18,7 +17,6 @@ def patch_attach_print():
                 result["fcontent"] = merged_content
             except Exception as e:
                 frappe.logger().error(f"Error merging machine catalogs for email: {e}")
-                
         return result
 
     frappe.attach_print = custom_attach_print
