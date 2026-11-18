@@ -1,8 +1,10 @@
 from typing import Dict, List, Optional, Union
 
+import re
+
 import frappe
 from frappe import _
-from frappe.utils import now_datetime
+from frappe.utils import cstr, now_datetime, strip_html
 
 from vin_chakra.vin_chakra.custom.sales_invoice import check_ticket_can_be_invoiced, get_new_invoice_branch
 
@@ -1020,3 +1022,202 @@ def get_machine_service_charges(item_codes=None):
 	return rates
 
 
+
+# --- Expense Claims made in the Technician Portal -----------------------------------------
+#
+# The portal's Expense Claim popup (page/technician_portal/technician_portal.py) keeps one HRMS
+# Expense Claim per service ticket and technician, filled in like the paper "Staff Tour
+# Settlement" form. The hidden `custom_ticket_claim_key` names the claim's ticket and employee:
+# "<ticket>::<employee>", with a unique index, so an employee has at most one draft or submitted
+# claim per ticket. A cancelled claim gets "::<claim>" added: the ticket can be claimed again, and
+# the new claim is its amendment. Claims without a key (HR's own claims) are untouched.
+# Expense Claim's doc_events in hooks.py point here.
+
+# Claims from before one-claim-per-ticket name their ticket first in each line's description:
+# "Ticket 0627 · customer · machine"
+LINE_TICKET = re.compile(r"\bTicket\s+([^\s·<]+)")
+
+
+def ticket_claim_key(ticket, employee):
+	return f"{ticket}::{employee}"
+
+
+def key_ticket(key):
+	"""The ticket a claim key names."""
+	return cstr(key).split("::")[0] or None
+
+
+def get_line_ticket(description):
+	"""The ticket an Expense Claim line was added for, read from its description."""
+	match = LINE_TICKET.search(strip_html(description or ""))
+	return match.group(1) if match else None
+
+
+def validate_expense_claim(doc, method=None):
+	"""Expense Claim validate (hooks.py): keep one active claim per ticket and employee (also when
+	HR changes the employee), and drop a collected amount the customer didn't have to pay."""
+	if doc.get("custom_payable_by_customer") != "Yes":
+		doc.custom_amount_collected = 0
+
+	ticket = key_ticket(doc.get("custom_ticket_claim_key"))
+	if not ticket:
+		return
+	key = ticket_claim_key(ticket, doc.employee)
+	other = frappe.db.get_value(
+		"Expense Claim", {"custom_ticket_claim_key": key, "name": ("!=", doc.name)}, "name"
+	)
+	if other:
+		frappe.throw(
+			_("Ticket {0} already has Expense Claim {1} for {2}.").format(
+				ticket, other, doc.employee_name or doc.employee
+			),
+			frappe.DuplicateEntryError,
+		)
+	doc.custom_ticket_claim_key = key
+
+
+def on_cancel_expense_claim(doc, method=None):
+	"""Expense Claim on_cancel (hooks.py): a cancelled claim frees its ticket for a new claim, but
+	still names it, so that claim can be its amendment."""
+	ticket = key_ticket(doc.get("custom_ticket_claim_key"))
+	if ticket:
+		key = f"{ticket_claim_key(ticket, doc.employee)}::{doc.name}"
+		doc.db_set("custom_ticket_claim_key", key, update_modified=False)
+
+
+# One-time migration to one claim per ticket: run once per site from patches.txt (an `execute:`
+# line in post_model_sync)
+
+# The paper form's expense lines (name, description): created once on a site that lacks them.
+# Technicians can pick every Expense Claim Type, not only these.
+EXPENSE_FORM_TYPES = [
+	("Bus / Train Fare", "Bus or train tickets"),
+	("Hotel Bill", "Hotel stay"),
+	("Conveyance", "Taxi / Auto / Local bus"),
+	("Food", ""),
+	("Others", ""),
+]
+
+# Header fields a split-off claim copies from the claim it came from
+EXPENSE_HEADER_FIELDS = [
+	"employee", "company", "posting_date", "expense_approver", "payable_account", "cost_center",
+	"remark", "project", "currency", "exchange_rate", "department",
+]
+EXPENSE_LINE_FIELDS = [
+	"expense_date", "expense_type", "description", "amount", "sanctioned_amount", "cost_center",
+	"default_account", "project",
+]
+
+
+def migrate_expense_claims_per_ticket():
+	"""Technician Portal Expense Claims move to one claim per service ticket (Staff Tour Settlement).
+
+	1. The paper form's expense lines (Bus / Train Fare, Hotel Bill, Conveyance, Food, Others)
+	   are created as Expense Claim Types where missing, with the account the existing types use.
+	2. Claims made before this change hold one line per ticket, found by "Ticket NNNN" in the
+	   line's description, often several tickets in one draft. Each draft is split into one draft
+	   per ticket. A submitted claim of one ticket is linked to it; a submitted claim of several
+	   tickets is left as it is (the portal reads its tickets from the descriptions).
+	"""
+	from frappe.utils.fixtures import sync_fixtures
+
+	# post_model_sync patches run before fixtures are synced, and the Expense Claim fields
+	# (fixtures/custom_field.json) are needed now
+	sync_fixtures("vin_chakra")
+	frappe.clear_cache(doctype="Expense Claim")
+
+	_setup_expense_types()
+	_split_ticket_claims()
+
+
+def _setup_expense_types():
+	accounts = {}
+	for row in frappe.get_all(
+		"Expense Claim Account",
+		filters={"parent": ["in", ["Food", "Others", "Travel"]]},
+		fields=["company", "default_account"],
+		order_by="idx asc",
+	):
+		accounts.setdefault(row.company, row.default_account)
+
+	for name, description in EXPENSE_FORM_TYPES:
+		if not frappe.db.exists("Expense Claim Type", name):
+			frappe.get_doc({
+				"doctype": "Expense Claim Type",
+				"expense_type": name,
+				"description": description,
+				"accounts": [{"company": c, "default_account": a} for c, a in accounts.items()],
+			}).insert(ignore_permissions=True)
+		elif description and not frappe.db.get_value("Expense Claim Type", name, "description"):
+			frappe.db.set_value("Expense Claim Type", name, "description", description, update_modified=False)
+
+
+def _split_ticket_claims():
+	claims = frappe.db.sql_list(
+		"""
+		SELECT DISTINCT claim.name
+		FROM `tabExpense Claim` claim
+		JOIN `tabExpense Claim Detail` detail ON detail.parent = claim.name AND detail.parenttype = 'Expense Claim'
+		WHERE claim.docstatus < 2 AND IFNULL(claim.custom_ticket_claim_key, '') = ''
+			AND detail.description LIKE %s
+		ORDER BY claim.creation
+		""",
+		"%Ticket %",
+	)
+	for name in claims:
+		doc = frappe.get_doc("Expense Claim", name)
+		groups, other_lines = {}, []
+		for row in doc.expenses:
+			ticket = get_line_ticket(row.description)
+			if ticket and frappe.db.exists("HD Ticket", ticket):
+				groups.setdefault(ticket, []).append(row)
+			else:
+				other_lines.append(row)
+		if not groups:
+			continue
+
+		if doc.docstatus == 1:
+			ticket = next(iter(groups))
+			key = ticket_claim_key(ticket, doc.employee)
+			if len(groups) == 1 and not other_lines and not frappe.db.exists("Expense Claim", {"custom_ticket_claim_key": key}):
+				frappe.db.set_value(
+					"Expense Claim",
+					doc.name,
+					{**_ticket_header(ticket), "custom_ticket_claim_key": key},
+					update_modified=False,
+				)
+			continue
+
+		# A draft keeps its first ticket (unless it also has lines of no ticket, or that ticket
+		# already has a claim of the employee's); the others move
+		tickets = list(groups)
+		keep = tickets[0] if not other_lines else None
+		if keep and frappe.db.exists("Expense Claim", {"custom_ticket_claim_key": ticket_claim_key(keep, doc.employee)}):
+			keep = None  # its lines stay here, as below
+		for ticket in tickets:
+			if ticket == keep:
+				continue
+			if frappe.db.exists("Expense Claim", {"custom_ticket_claim_key": ticket_claim_key(ticket, doc.employee)}):
+				print(f"Expense Claim {doc.name}: ticket {ticket} already has a claim; its lines stay here")
+				continue
+			new = frappe.new_doc("Expense Claim")
+			new.update({f: doc.get(f) for f in EXPENSE_HEADER_FIELDS})
+			new.update({"custom_ticket_claim_key": ticket_claim_key(ticket, doc.employee), **_ticket_header(ticket)})
+			for row in groups[ticket]:
+				new.append("expenses", {f: row.get(f) for f in EXPENSE_LINE_FIELDS})
+				doc.remove(row)
+			new.flags.ignore_permissions = True
+			new.insert()
+			print(f"Expense Claim {doc.name}: ticket {ticket} moved to {new.name}")
+
+		if keep:
+			doc.custom_ticket_claim_key = ticket_claim_key(keep, doc.employee)
+			doc.update(_ticket_header(keep))
+		doc.flags.ignore_permissions = True
+		doc.save()
+
+
+def _ticket_header(ticket):
+	"""A ticket's claim fields: its customer name, and its Call Type as the Reason for Trip."""
+	customer_name, call_type = frappe.db.get_value("HD Ticket", ticket, ["custom_customer_name", "ticket_type"]) or (None, None)
+	return {"custom_customer_name": cstr(customer_name), "custom_trip_reason": cstr(call_type)}

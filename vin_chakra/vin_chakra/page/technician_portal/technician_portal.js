@@ -851,229 +851,7 @@ class TechnicianPortal {
         });
     }
     open_expense_claim_dialog() {
-        let self = this;
-        // Amounts and Expense Claim Types chosen but not yet in the Expense Claim. They survive
-        // range switches and reopening the popup, and are stored when Share (Excel) is clicked.
-        self.expense_amounts = self.expense_amounts || {};
-        self.expense_types = self.expense_types || {};
-        let amounts = self.expense_amounts;
-        let types = self.expense_types;
-        let stored = {};  // ticket -> amount already in the Expense Claim ("" when none)
-        let stored_types = {};  // ticket -> that line's Expense Claim Type ("" when none)
-        let range = "today";
-        let currency = frappe.boot.sysdefaults.currency;
-        let esc = frappe.utils.escape_html;
-
-        let dialog = new frappe.ui.Dialog({
-            title: __("Expense Claim"),
-            size: "large",
-            fields: [{ fieldtype: "HTML", fieldname: "expense_claim_html" }]
-        });
-        dialog.$wrapper.addClass("tp-expense-dialog");
-        dialog.onhide = () => {
-            dialog.$wrapper.remove();
-        };
-
-        let $body = dialog.get_field("expense_claim_html").$wrapper;
-        $body.html(`
-            <div class="tp-expense-toolbar">
-                <div class="tp-view-selector">
-                    <button class="tp-view-btn active" data-range="today">${__("Today")}</button>
-                    <button class="tp-view-btn" data-range="last_week">${__("Last 1 Week")}</button>
-                </div>
-                <span class="tp-expense-period"></span>
-                <button class="btn btn-success btn-sm tp-expense-share">
-                    <i class="fa fa-file-excel-o"></i> ${__("Share (Excel)")}
-                </button>
-            </div>
-            <div class="tp-expense-table-wrap"></div>
-            <div class="tp-expense-hint">${__("Expense amounts are added to your Expense Claim when you click Share (Excel).")}</div>
-        `);
-        let $wrap = $body.find(".tp-expense-table-wrap");
-        let $share = $body.find(".tp-expense-share");
-
-        // Typed and stored amounts compare as 2-decimal strings; "" means no expense
-        const amount_key = (value) => (value === "" || value === null || value === undefined) ? "" : flt(value, 2).toFixed(2);
-
-        const update_total = () => {
-            let total = 0;
-            $wrap.find(".tp-expense-input:not(.is-invalid)").each(function () {
-                total += flt(this.value);
-            });
-            $wrap.find(".tp-expense-total").text(format_currency(total, currency));
-        };
-
-        const render = (data) => {
-            let tickets = data.tickets || [];
-            let expense_types = data.expense_types || [];
-            let from = frappe.datetime.str_to_user(data.from_date);
-            let to = frappe.datetime.str_to_user(data.to_date);
-            $body.find(".tp-expense-period").text(from === to ? from : `${from} – ${to}`);
-
-            let rows = tickets.map(t => {
-                stored[t.name] = amount_key(t.expense_amount);
-                stored_types[t.name] = t.expense_type || "";
-                // Lines in a submitted claim are read-only; HR owns them now
-                let locked = t.expense_claim_locked;
-                let typed = !locked && t.name in amounts;
-                let type_changed = !locked && t.name in types;
-                let type_value = type_changed ? types[t.name] : stored_types[t.name];
-                let type_options = [""].concat(expense_types, type_value && !expense_types.includes(type_value) ? [type_value] : [])
-                    .map(et => `<option value="${esc(et)}" ${et === type_value ? 'selected' : ''}>${et ? esc(__(et)) : __("Select type")}</option>`)
-                    .join("");
-                // data-label names each cell in the stacked phone layout
-                return `
-                    <tr>
-                        <td data-label="${__("Ticket No")}">
-                            <a href="javascript:void(0)" class="tp-expense-ticket-link" data-name="${esc(t.name)}" style="color:var(--tp-primary); font-weight:700; text-decoration:none;">${esc(t.name)}</a>
-                        </td>
-                        <td data-label="${__("Machine")}">${esc(t.machine_display)}</td>
-                        <td data-label="${__("Customer")}">${esc(t.custom_customer_name || '')}</td>
-                        <td data-label="${__("Required Spares")}">${esc(t.custom_required_spares || '-')}</td>
-                        <td data-label="${__("Location")}">${esc(t.location)}</td>
-                        <td data-label="${__("Date")}" class="text-nowrap">${frappe.datetime.str_to_user((t.expense_date || '').slice(0, 10))}</td>
-                        <td data-label="${__("Status")}">${esc(t.status)}</td>
-                        <td data-label="${__("Expense Type")}">
-                            <select class="form-control input-xs tp-expense-type ${type_changed ? 'is-dirty' : ''}" data-ticket="${esc(t.name)}" ${locked ? 'disabled' : ''}>
-                                ${type_options}
-                            </select>
-                        </td>
-                        <td data-label="${__("Expense Amount")}">
-                            <input type="number" class="form-control input-xs tp-expense-input ${typed ? 'is-dirty' : ''}"
-                                ${locked ? `disabled title="${esc(__("Already submitted to HR; it can't be changed here."))}"` : ''}
-                                data-ticket="${esc(t.name)}" value="${esc(typed ? amounts[t.name] : stored[t.name])}" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
-                        </td>
-                    </tr>
-                `;
-            }).join("");
-
-            let empty = range === "today" ? __("No customer visits today") : __("No customer visits in the last week");
-            $wrap.html(`
-                <table class="table table-bordered tp-expense-table" id="tp-expense-table">
-                    <thead>
-                        <tr>
-                            <th>${__("Ticket No")}</th><th>${__("Machine")}</th><th>${__("Customer")}</th><th>${__("Required Spares")}</th>
-                            <th>${__("Location")}</th><th>${__("Date")}</th><th>${__("Status")}</th><th>${__("Expense Type")}</th>
-                            <th>${__("Expense Amount")}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${rows || `<tr><td colspan="9" class="tp-expense-empty">${empty}</td></tr>`}
-                    </tbody>
-                    ${tickets.length ? `<tfoot><tr><th colspan="8" class="text-right">${__("Total")}</th><th class="tp-expense-total"></th></tr></tfoot>` : ''}
-                </table>
-            `);
-            update_total();
-            $share.prop("disabled", !tickets.length);
-        };
-
-        const load = () => {
-            let requested = range;
-            $wrap.html(`<div class="tp-expense-empty">${__("Loading...")}</div>`);
-            $share.prop("disabled", true);
-            frappe.call({
-                method: "vin_chakra.vin_chakra.page.technician_portal.technician_portal.get_expense_claim_tickets",
-                args: { date_range: requested },
-                callback: function (r) {
-                    // Ignore a slower answer for a range the user has already switched away from
-                    if (r.message && requested === range) render(r.message);
-                }
-            });
-        };
-
-        $body.on("click", "[data-range]", function () {
-            let next = $(this).attr("data-range");
-            if (next === range) return;
-            range = next;
-            $body.find("[data-range]").removeClass("active");
-            $(this).addClass("active");
-            load();
-        });
-
-        $body.on("input", ".tp-expense-input", function () {
-            let ticket = $(this).attr("data-ticket");
-            let invalid = this.validity.badInput || (this.value !== "" && flt(this.value) < 0);
-            if (invalid || amount_key(this.value) === stored[ticket]) {
-                delete amounts[ticket];
-            } else {
-                amounts[ticket] = this.value;
-            }
-            $(this).toggleClass("is-invalid", invalid).toggleClass("is-dirty", ticket in amounts);
-            update_total();
-        });
-
-        $body.on("change", ".tp-expense-type", function () {
-            let ticket = $(this).attr("data-ticket");
-            if (this.value === stored_types[ticket]) {
-                delete types[ticket];
-            } else {
-                types[ticket] = this.value;
-            }
-            $(this).removeClass("is-invalid").toggleClass("is-dirty", ticket in types);
-        });
-
-        // Without stepper arrows, don't let the mouse wheel change an amount by accident
-        $body.on("wheel", ".tp-expense-input", function () {
-            if (document.activeElement === this) this.blur();
-        });
-
-        $share.on("click", function () {
-            let $invalid = $wrap.find(".tp-expense-input.is-invalid");
-            if ($invalid.length) {
-                frappe.msgprint(__("Please enter valid, non-negative expense amounts."));
-                $invalid.first().focus();
-                return;
-            }
-
-            // Store the editable rows in the Expense Claim, then download the Excel of all rows
-            let values = {}, row_types = {}, editable = {}, editable_types = {};
-            let $untyped = null;
-            $wrap.find("tbody tr").each(function () {
-                let $input = $(this).find(".tp-expense-input");
-                if (!$input.length) return;  // the "no tickets" row
-                let ticket = $input.attr("data-ticket");
-                let $type = $(this).find(".tp-expense-type");
-                values[ticket] = $input.val();
-                row_types[ticket] = $type.val() || "";
-                if ($input.prop("disabled")) return;
-                editable[ticket] = values[ticket];
-                editable_types[ticket] = row_types[ticket];
-                if (values[ticket] !== "" && !row_types[ticket] && !$untyped) $untyped = $type;
-            });
-            if ($untyped) {
-                $untyped.addClass("is-invalid").focus();
-                frappe.msgprint(__("Select an Expense Claim Type for ticket {0}.", [$untyped.attr("data-ticket")]));
-                return;
-            }
-            frappe.call({
-                method: "vin_chakra.vin_chakra.page.technician_portal.technician_portal.save_to_expense_claim",
-                args: { amounts: JSON.stringify(editable), types: JSON.stringify(editable_types) },
-                freeze: true,
-                freeze_message: __("Saving to Expense Claim..."),
-                callback: function (r) {
-                    Object.keys(editable).forEach(ticket => {
-                        delete amounts[ticket];
-                        delete types[ticket];
-                    });
-                    if (r.message && r.message.changed) {
-                        frappe.show_alert({ message: __("Expense amounts saved to your Expense Claim"), indicator: "green" });
-                    }
-                    open_url_post("/api/method/vin_chakra.vin_chakra.page.technician_portal.technician_portal.download_expense_claim",
-                        { date_range: range, amounts: values, types: row_types });
-                    load();  // show the stored amounts
-                }
-            });
-        });
-
-        // Ticket No click -> open the same ticket detail dialog used elsewhere in the portal
-        $body.on("click", ".tp-expense-ticket-link", function () {
-            let ticket_name = $(this).attr("data-name");
-            dialog.hide();
-            self.open_ticket_details(ticket_name);
-        });
-
-        dialog.show();
-        load();
+        new TechnicianExpenseClaim(this).show();
     }
 
     show_ticket_detail_dialog(t) {
@@ -1999,5 +1777,860 @@ class TechnicianPortal {
                 d.show();
             }
         });
+    }
+}
+
+// Expense Claim popup, laid out like the paper "Staff Tour Settlement" form. The first screen
+// lists the tickets the technician visited on a day or in a week (Today, Last 1 Week or a picked
+// date); tapping one opens that ticket's claim. Edits are kept per ticket until the list's Save,
+// the only button that writes (a draft Expense Claim per ticket); Share (Excel) only downloads a
+// file. Server side: the Expense Claim popup section of technician_portal.py.
+const TP_EXPENSE_API = "vin_chakra.vin_chakra.page.technician_portal.technician_portal.";
+const TP_EC_MAX_LIST_DAYS = 92;  // the longest From–To period (MAX_LIST_DAYS on the server)
+
+class TechnicianExpenseClaim {
+    constructor(portal) {
+        this.portal = portal;
+        // Unsaved edits per ticket, {ticket: {form, modified, period}}: `modified` is the claim's
+        // timestamp they were made on, `period` the list's [from, to] the ticket was opened from.
+        // Kept on the portal, so they survive going back to the list, switching the dates and
+        // closing the popup, until the list's Save.
+        portal.expense_drafts = portal.expense_drafts || {};
+        portal.expense_problems = portal.expense_problems || {};  // {ticket: [why it wasn't saved]}
+        this.drafts = portal.expense_drafts;
+        this.problems = portal.expense_problems;
+        // The list shows the visits from `from_date` to `to_date`, both included
+        let today = frappe.datetime.get_today();
+        [this.from_date, this.to_date] = portal.expense_period || [today, today];
+        this.list_notice = null;  // the last Save's result, shown under the list
+        this.guard_unsaved_changes();
+        this.screen = "list";
+        this.list = null;  // get_tickets answer on screen
+        this.data = null;  // get_ticket_claim answer on screen
+        this.form = null;  // the open ticket's form
+        this.base = null;  // that form as saved (or its defaults), to tell edits apart
+        this.seq = 0;      // keys for expense rows
+        this.uid = frappe.utils.get_random(6);
+        this.esc = frappe.utils.escape_html;
+        this.touch = window.matchMedia("(pointer: coarse)").matches;
+        this.make_dialog();
+    }
+
+    show() {
+        this.dialog.show();
+        this.show_list();
+    }
+
+    // Unsaved expenses live only in this page until Save: warn before it is closed or reloaded
+    guard_unsaved_changes() {
+        if (this.portal.expense_unload_guard) return;
+        this.portal.expense_unload_guard = true;
+        window.addEventListener("beforeunload", (e) => {
+            if (!Object.keys(this.portal.expense_drafts || {}).length) return;
+            e.preventDefault();
+            e.returnValue = "";
+        });
+    }
+
+    make_dialog() {
+        this.dialog = new frappe.ui.Dialog({
+            title: __("Expense Claim"),
+            fields: [{ fieldtype: "HTML", fieldname: "body" }],
+        });
+        this.dialog.$wrapper.addClass("tp-ec-dialog");
+        this.$body = this.dialog.get_field("body").$wrapper.addClass("tp-ec");
+        // Our own footer (totals, Share, Save) stays in view while the body scrolls
+        this.dialog.footer.removeClass("hide");
+        this.dialog.standard_actions.addClass("hide");
+        this.$footer = $(`<div class="tp-ec-footer"></div>`).appendTo(this.dialog.custom_actions);
+        this.bind_events();
+        this.dialog.onhide = () => this.dialog.$wrapper.remove();
+    }
+
+    // --- List screen ------------------------------------------------------------------
+
+    show_list() {
+        this.screen = "list";
+        this.ticket = this.data = this.form = this.base = null;
+        this.$body.html(`
+            <div class="tp-ec-toolbar">
+                <div class="tp-view-selector" role="group">
+                    <button type="button" class="tp-view-btn" data-range="today">${__("Today")}</button>
+                    <button type="button" class="tp-view-btn" data-range="last_week">${__("Last 1 Week")}</button>
+                </div>
+                <div class="tp-ec-dates">
+                    <label class="tp-ec-date-field"><span>${__("From")}</span>
+                        ${this.date_box(`<input type="date" class="form-control tp-ec-date" data-date="from" max="${frappe.datetime.get_today()}">`)}</label>
+                    <label class="tp-ec-date-field"><span>${__("To")}</span>
+                        ${this.date_box(`<input type="date" class="form-control tp-ec-date" data-date="to" max="${frappe.datetime.get_today()}">`)}</label>
+                </div>
+            </div>
+            <div class="tp-ec-list-wrap"><div class="tp-ec-empty">${__("Loading...")}</div></div>
+        `);
+        this.mark_period();
+        this.list = null;
+        this.render_footer();
+        this.load_list();
+    }
+
+    // The dates in the inputs; Today and Last 1 Week (the 7 days up to today) are shortcuts
+    mark_period() {
+        let today = frappe.datetime.get_today();
+        this.$body.find('[data-range="today"]').toggleClass("active", this.from_date === today && this.to_date === today);
+        this.$body.find('[data-range="last_week"]').toggleClass("active", this.from_date === frappe.datetime.add_days(today, -6) && this.to_date === today);
+        this.$body.find('[data-date="from"]').val(this.from_date);
+        this.$body.find('[data-date="to"]').val(this.to_date);
+        this.$body.find(".tp-ec-date").removeClass("is-invalid").each((i, el) => this.show_date(el));
+    }
+
+    // A date input that shows its date in the system format (dd-mm-yyyy), whatever the
+    // browser's language: the input's own text is hidden under ours, so a tap still opens the
+    // phone's date picker
+    date_box(input, value = "") {
+        return `<div class="tp-ec-datebox">${input}<span class="tp-ec-datebox-text ${value ? "" : "is-empty"}" aria-hidden="true">${this.esc(this.user_date(value))}</span></div>`;
+    }
+
+    show_date(input) {
+        $(input).siblings(".tp-ec-datebox-text").text(this.user_date(input.value)).toggleClass("is-empty", !input.value);
+    }
+
+    user_date(value) {
+        return value ? frappe.datetime.str_to_user(value) : (frappe.boot.sysdefaults.date_format || "dd-mm-yyyy");
+    }
+
+    set_period(from_date, to_date) {
+        [this.from_date, this.to_date] = this.portal.expense_period = [from_date, to_date];
+        this.list_notice = null;
+        this.list = null;  // nothing to share until the new list is in
+        this.mark_period();
+        this.$body.find(".tp-ec-list-wrap").html(`<div class="tp-ec-empty">${__("Loading...")}</div>`);
+        this.render_footer();
+        this.load_list();
+    }
+
+    // Why the From / To dates can't be listed, or "" (the server checks the same)
+    period_problem(from_date, to_date) {
+        if (!from_date || !to_date) return __("Choose the From and To dates.");
+        if (to_date > frappe.datetime.get_today()) return __("The dates can't be in the future.");
+        if (from_date > to_date) return __("The From date can't be after the To date.");
+        if (frappe.datetime.get_day_diff(to_date, from_date) >= TP_EC_MAX_LIST_DAYS) {
+            return __("Choose a period of up to {0} days.", [TP_EC_MAX_LIST_DAYS]);
+        }
+        return "";
+    }
+
+    load_list() {
+        // Only the latest request counts: an older answer is for dates the user has left
+        let seq = this.list_seq = (this.list_seq || 0) + 1;
+        let current = () => this.screen === "list" && seq === this.list_seq;
+        frappe.call({
+            method: TP_EXPENSE_API + "get_expense_claim_list",
+            args: { from_date: this.from_date, to_date: this.to_date },
+            callback: (r) => {
+                // Ignore a slower answer for dates or a screen the user has left
+                if (!r.message || !current()) return;
+                this.list = r.message;
+                this.render_list();
+            },
+            error: () => {
+                if (current()) this.$body.find(".tp-ec-list-wrap").html(`<div class="tp-ec-empty">${__("Could not load your visits.")}</div>`);
+            },
+        });
+    }
+
+    render_list() {
+        let data = this.list, esc = this.esc;
+        let total = 0;
+        let rows = data.tickets.map((t) => {
+            let draft = this.drafts[t.name];
+            let claim = t.claim;
+            let amount = draft ? this.form_total(draft.form) : claim ? claim.total : null;
+            total += amount || 0;
+            let [kind, label] = draft && this.problems[t.name] ? ["problem", __("Needs attention")]
+                : draft ? ["unsaved", __("Unsaved")]
+                : claim ? [claim.locked ? "locked" : "draft", __(claim.status)]
+                : ["none", __("Not claimed")];
+            return `
+                <tr class="tp-ec-list-row" data-ticket="${esc(t.name)}" tabindex="0" role="button">
+                    <td>
+                        <div class="tp-ec-ticket-no">${esc(t.name)}</div>
+                        ${t.customer_name ? `<div class="tp-ec-customer">${esc(t.customer_name)}</div>` : ""}
+                        <div class="tp-ec-meta"><span class="text-nowrap">${frappe.datetime.str_to_user(t.visit_date)}</span> <span class="text-nowrap">· ${esc(__(t.status))}</span></div>
+                    </td>
+                    <td class="tp-ec-claimed">
+                        <div class="tp-ec-amount">${amount === null ? "—" : format_currency(amount, data.currency)}</div>
+                        <span class="tp-ec-chip is-${kind}">${esc(label)}</span>
+                    </td>
+                    <td class="tp-ec-go">${frappe.utils.icon("chevron-right", "sm")}</td>
+                </tr>`;
+        }).join("");
+        let from = frappe.datetime.str_to_user(data.from_date), to = frappe.datetime.str_to_user(data.to_date);
+        let empty = data.from_date !== data.to_date ? __("No customer visits from {0} to {1}", [from, to])
+            : data.to_date === frappe.datetime.get_today() ? __("No customer visits today")
+            : __("No customer visits on {0}", [to]);
+        this.$body.find(".tp-ec-list-wrap").html(`
+            ${data.employee_missing ? `<div class="tp-ec-banner is-warning">${__("No active Employee is linked to your user, so you can't save Expense Claims. Please contact HR.")}</div>` : ""}
+            <table class="table table-bordered tp-ec-list">
+                <thead><tr><th>${__("Ticket")}</th><th class="tp-ec-claimed" colspan="2">${__("Claimed")}</th></tr></thead>
+                <tbody>${rows || `<tr><td colspan="3" class="tp-ec-empty">${empty}</td></tr>`}</tbody>
+                ${data.tickets.length ? `<tfoot><tr><th class="text-right">${__("Total")}</th><th class="tp-ec-claimed" colspan="2">${format_currency(total, data.currency)}</th></tr></tfoot>` : ""}
+            </table>
+            ${data.tickets.length ? `<div class="tp-ec-hint">${__("Tap a ticket to enter its expenses.")}</div>` : ""}
+        `);
+        this.render_footer();
+    }
+
+    // --- Ticket screen ----------------------------------------------------------------
+
+    open_ticket(ticket) {
+        this.screen = "ticket";
+        this.ticket = ticket;
+        this.list_notice = null;  // the last Save's result isn't news any more
+        this.data = this.form = this.base = null;
+        let draft_period = this.drafts[ticket] && this.drafts[ticket].period;
+        this.period = draft_period || (this.list ? [this.list.from_date, this.list.to_date] : null);
+        this.$body.html(`${this.back_button()}<div class="tp-ec-empty">${__("Loading...")}</div>`);
+        this.$footer.empty();
+        this.dialog.$wrapper.find(".modal-body").scrollTop(0);
+        let current = () => this.screen === "ticket" && this.ticket === ticket;
+        frappe.call({
+            method: TP_EXPENSE_API + "get_ticket_expense_claim",
+            args: { ticket, from_date: this.period ? this.period[0] : "", to_date: this.period ? this.period[1] : "" },
+            callback: (r) => {
+                if (!r.message || !current()) return;
+                this.data = r.message;
+                this.base = this.form_from_data(this.data);
+                let saved_modified = this.data.claim ? this.data.claim.modified : null;
+                let draft = this.drafts[ticket];
+                if (draft && this.is_locked()) {
+                    delete this.drafts[ticket];  // submitted meanwhile: HR has it now
+                    draft = null;
+                }
+                // Edits made on an older version of the claim can't be saved over the new one
+                this.draft_modified = draft ? draft.modified : saved_modified;
+                this.stale = !!draft && draft.modified !== saved_modified;
+                this.form = draft ? JSON.parse(JSON.stringify(draft.form)) : JSON.parse(JSON.stringify(this.base));
+                this.render_ticket();
+                if (this.drafts[ticket] && this.problems[ticket]) this.validate();  // why the last Save skipped it
+            },
+            error: () => {
+                if (current()) this.$body.find(".tp-ec-empty").text(__("Could not load this ticket."));
+            },
+        });
+    }
+
+    back_button() {
+        return `<button type="button" class="btn btn-link tp-ec-back">${frappe.utils.icon("chevron-left", "sm")} ${__("Tickets")}</button>`;
+    }
+
+    is_locked() {
+        return !!(this.data && this.data.claim && this.data.claim.locked);
+    }
+
+    new_row(e = {}) {
+        return {
+            key: `r${++this.seq}`,
+            name: e.name || null,
+            expense_type: e.expense_type || "",
+            amount: e.amount ? flt(e.amount, 2).toFixed(2) : "",
+        };
+    }
+
+    form_from_data(data) {
+        let c = data.claim, d = data.defaults;
+        if (!c) {
+            return {
+                from_location: "",
+                journey_date: d.journey_date || "",
+                no_of_days: String(d.no_of_days || 1),
+                payable_by_customer: d.payable_by_customer || "",
+                amount_collected: "",
+                expenses: [this.new_row()],
+            };
+        }
+        return {
+            from_location: c.from_location || "",
+            journey_date: c.journey_date || d.journey_date || "",
+            no_of_days: String(c.no_of_days || d.no_of_days || ""),
+            payable_by_customer: c.payable_by_customer || d.payable_by_customer || "",
+            amount_collected: c.amount_collected === null || c.amount_collected === undefined ? "" : flt(c.amount_collected, 2).toFixed(2),
+            expenses: c.expenses.map((e) => this.new_row(e)),
+        };
+    }
+
+    render_ticket() {
+        let d = this.data, t = d.ticket, c = d.claim, f = this.form, esc = this.esc;
+        let locked = this.is_locked();
+        let dis = locked ? "disabled" : "";
+        let id = (name) => `tp-ec-${this.uid}-${name}`;
+
+        let banners = [];
+        if (d.employee_missing) {
+            banners.push(["warning", esc(__("No active Employee is linked to your user, so you can't save Expense Claims. Please contact HR."))]);
+        }
+        if (c && c.legacy) {
+            banners.push(["info", esc(__("These expenses are in Expense Claim {0} ({1}) together with other tickets. HR has it now, so they can't be changed here.", [c.name, __(c.status)]))]);
+        } else if (locked) {
+            banners.push(["info", esc(__("Expense Claim {0} is {1}. HR has it now, so it can't be changed here.", [c.name, __(c.status)]))]);
+        }
+        if (!c && d.cancelled_claim) {
+            banners.push(["info", esc(__("Expense Claim {0} for this ticket was cancelled. Saving makes a new claim.", [d.cancelled_claim]))]);
+        }
+        if (this.drafts[t.name] && this.problems[t.name]) {
+            banners.push(["danger tp-ec-problems", esc(__("Not saved: {0}", [this.problems[t.name].join(" ")]))]);
+        }
+        if (this.stale) {
+            banners.push(["warning", esc(__("This claim was changed after you started editing it (for example by HR), so your changes can't be saved over it."))
+                + ` <button type="button" class="btn btn-xs btn-default tp-ec-discard">${__("Discard my changes")}</button>`]);
+        }
+
+        let field = (name, label, control, opts = {}) => `
+            <div class="tp-ec-field" data-field="${name}" ${opts.hidden ? "hidden" : ""}>
+                <label class="tp-ec-label" ${opts.no_for ? "" : `for="${id(name)}"`}>${label}${opts.required && !locked ? ` <span class="tp-ec-req">*</span>` : ""}</label>
+                ${control}
+                <div class="tp-ec-error" role="alert"></div>
+            </div>`;
+        let select = (name, values, value, placeholder) => {
+            let options = values.slice();
+            if (value && !options.includes(value)) options.push(value);
+            return `<select class="form-control" id="${id(name)}" data-bind="${name}" ${dis}>
+                <option value="">${esc(placeholder)}</option>
+                ${options.map((o) => `<option value="${esc(o)}" ${o === value ? "selected" : ""}>${esc(__(o))}</option>`).join("")}
+            </select>`;
+        };
+
+        // The claim's status only; its number (HR-EXP-…) isn't shown here
+        let claim_line = c ? esc(__(c.status)) : esc(__("Not saved yet"));
+        let rows = f.expenses.map((e) => this.row_html(e, locked)).join("");
+
+        this.$body.html(`
+            ${this.back_button()}
+            ${banners.map(([kind, html]) => `<div class="tp-ec-banner is-${kind}">${html}</div>`).join("")}
+            <section class="tp-ec-section">
+                <h5 class="tp-ec-section-title">${__("Trip")}</h5>
+                <div class="tp-ec-ticket-head">
+                    <a href="#" class="tp-ec-ticket-link" title="${esc(__("Open ticket details"))}">${esc(t.name)}</a>
+                    <span class="tp-ec-pill">${esc(__(t.status))}</span>
+                </div>
+                ${t.customer_name ? `<div class="tp-ec-customer">${esc(t.customer_name)}</div>` : ""}
+                <div class="tp-ec-meta">
+                    ${esc(__("Visited {0}", [frappe.datetime.str_to_user(t.visit_date)]))} · ${claim_line}
+                    <span class="tp-ec-chip is-unsaved tp-ec-unsaved" hidden>${__("Unsaved")}</span>
+                </div>
+                <div class="tp-ec-grid is-date">
+                    ${field("journey_date", __("Date of journey"), this.date_box(`<input type="date" class="form-control" id="${id("journey_date")}" data-bind="journey_date" value="${esc(f.journey_date)}" max="${frappe.datetime.get_today()}" ${dis}>`, f.journey_date), { required: true })}
+                    ${field("no_of_days", __("No. of days"), `<input type="number" class="form-control" id="${id("no_of_days")}" data-bind="no_of_days" value="${esc(f.no_of_days)}" min="1" max="31" step="1" inputmode="numeric" ${dis}>`, { required: true })}
+                </div>
+                ${field("trip_reason", __("Reason for trip (call type)"), this.trip_reason_html(), { no_for: true })}
+            </section>
+            <section class="tp-ec-section">
+                <h5 class="tp-ec-section-title">${__("From → To")}</h5>
+                ${field("from_location", __("From Location"), `<input type="text" class="form-control" id="${id("from_location")}" data-bind="from_location" value="${esc(f.from_location)}" maxlength="140" autocomplete="off" enterkeyhint="next" placeholder="${esc(__("Where you started"))}" ${dis}>`, { required: true })}
+                ${field("to_location", __("To (customer address)"), this.to_location_html(), { no_for: true })}
+            </section>
+            <section class="tp-ec-section">
+                <h5 class="tp-ec-section-title">${__("Customer payment")}</h5>
+                <div class="tp-ec-grid">
+                    ${field("payable_by_customer", __("Payable by customer"), select("payable_by_customer", ["Yes", "No"], f.payable_by_customer, __("Select")), { required: true })}
+                    ${field("amount_collected", __("Amount collected"), `<input type="number" class="form-control tp-ec-number" id="${id("amount_collected")}" data-bind="amount_collected" value="${esc(f.amount_collected)}" min="0" step="0.01" inputmode="decimal" placeholder="0.00" ${dis}>`, { required: true, hidden: f.payable_by_customer !== "Yes" })}
+                </div>
+            </section>
+            <section class="tp-ec-section" data-field="expenses">
+                <h5 class="tp-ec-section-title">${__("Expenses")}</h5>
+                <div class="tp-ec-error" role="alert"></div>
+                <div class="tp-ec-rows">${rows}</div>
+                ${locked ? "" : `<button type="button" class="btn btn-default btn-block tp-ec-add">${frappe.utils.icon("plus", "sm")} <span>${__("Add Another Expense")}</span></button>`}
+            </section>
+        `);
+        this.render_footer();
+        this.on_form_change(false);
+    }
+
+    // Reason for Trip: the ticket's Call Type (read-only; Save stores it); a submitted claim
+    // shows what it saved
+    trip_reason_html() {
+        let d = this.data, esc = this.esc;
+        let text = this.is_locked() ? d.claim.trip_reason : d.ticket.call_type;
+        if (!text) {
+            return `<div class="tp-ec-static is-empty">${esc(this.is_locked() ? __("Not recorded") : __("Not set on the ticket"))}</div>`;
+        }
+        return `<div class="tp-ec-static">${esc(__(text))}</div>`;
+    }
+
+    // To Location: the customer's address from the ticket (read-only); a submitted claim shows
+    // what it saved
+    to_location_html() {
+        let d = this.data, esc = this.esc;
+        let text = this.is_locked() ? d.claim.to_location : d.to_location && d.to_location.text;
+        if (!text && !this.is_locked()) {
+            return `<div class="tp-ec-banner is-warning tp-ec-no-location">${esc(d.to_location_warning || "")}</div>`;
+        }
+        return `<div class="tp-ec-to"><div class="tp-ec-to-place">${esc(text || __("Not recorded"))}</div></div>`;
+    }
+
+    row_html(e, locked) {
+        let esc = this.esc;
+        let types = this.data.expense_types.map((t) => t.name);
+        if (e.expense_type && !types.includes(e.expense_type)) types.push(e.expense_type);
+        let dis = locked ? "disabled" : "";
+        return `
+            <div class="tp-ec-row ${locked ? "is-locked" : ""}" data-key="${e.key}">
+                <select class="form-control tp-ec-type" data-row="expense_type" aria-label="${esc(__("Expense type"))}" ${dis}>
+                    <option value="">${__("Select type")}</option>
+                    ${types.map((name) => `<option value="${esc(name)}" ${name === e.expense_type ? "selected" : ""}>${esc(__(name))}</option>`).join("")}
+                </select>
+                <input type="number" class="form-control tp-ec-number" data-row="amount" value="${esc(e.amount)}" min="0.01" step="0.01"
+                    inputmode="decimal" placeholder="0.00" aria-label="${esc(__("Amount"))}" ${dis}>
+                ${locked ? "" : `<button type="button" class="btn tp-ec-del" aria-label="${esc(__("Delete this expense"))}" title="${esc(__("Delete"))}">${frappe.utils.icon("trash-2", "sm")}</button>`}
+                <div class="tp-ec-error" role="alert"></div>
+            </div>`;
+    }
+
+    // --- Form state -------------------------------------------------------------------
+
+    amount_ok(value, allow_zero) {
+        if (value === "" || value === null || value === undefined) return !!allow_zero;
+        let n = Number(value);
+        return Number.isFinite(n) && n >= 0 && (allow_zero || n > 0);
+    }
+
+    form_total(form) {
+        return form.expenses.reduce((sum, e) => sum + (this.amount_ok(e.amount) ? flt(e.amount, 2) : 0), 0);
+    }
+
+    // The form as compared and saved: trimmed text, 2-decimal amounts, no row keys
+    snapshot(form) {
+        let amt = (v) => (v === "" || v === null || v === undefined) ? "" : (Number.isFinite(Number(v)) ? flt(v, 2).toFixed(2) : String(v));
+        return JSON.stringify({
+            from_location: (form.from_location || "").trim(),
+            journey_date: form.journey_date || "",
+            no_of_days: String(form.no_of_days || "").trim(),
+            payable_by_customer: form.payable_by_customer || "",
+            amount_collected: form.payable_by_customer === "Yes" ? amt(form.amount_collected) : "",
+            expenses: form.expenses.map((e) => [e.name || "", e.expense_type || "", amt(e.amount)]),
+        });
+    }
+
+    // The form as sent to the server; `period` dates new expense lines (the list's dates)
+    payload(form, modified, period) {
+        return {
+            from_location: (form.from_location || "").trim(),
+            journey_date: form.journey_date || "",
+            no_of_days: String(form.no_of_days || "").trim(),
+            payable_by_customer: form.payable_by_customer || "",
+            amount_collected: form.payable_by_customer === "Yes" ? form.amount_collected : "",
+            expenses: form.expenses.map((e) => ({ name: e.name, expense_type: e.expense_type, amount: e.amount })),
+            modified,
+            visit_from: period ? period[0] : "",
+            visit_to: period ? period[1] : "",
+        };
+    }
+
+    // Keep the draft (or drop it when the form is back to what's saved) and refresh the totals
+    on_form_change(store = true) {
+        if (!this.form) return;
+        let dirty = this.snapshot(this.form) !== this.snapshot(this.base);
+        if (!dirty && this.stale) {
+            // Back to exactly what's saved: nothing of the old edits is left to lose
+            this.stale = false;
+            this.draft_modified = this.data.claim ? this.data.claim.modified : null;
+            this.$body.find(".tp-ec-discard").closest(".tp-ec-banner").remove();
+        }
+        if (store && !this.is_locked()) {
+            if (dirty) this.drafts[this.ticket] = { form: this.form, modified: this.draft_modified, period: this.period };
+            else delete this.drafts[this.ticket];
+            // An edit makes the last Save's problems and "Please fix" out of date
+            delete this.problems[this.ticket];
+            this.$body.find(".tp-ec-problems").remove();
+            this.notice();
+        }
+        this.$body.find(".tp-ec-unsaved").prop("hidden", !this.drafts[this.ticket]);
+        this.$footer.find(".tp-ec-save").prop("disabled", this.save_blocked());
+        this.$footer.find(".tp-ec-total").text(format_currency(this.form_total(this.form), this.data.currency));
+    }
+
+    find_row(key) {
+        return this.form.expenses.find((e) => e.key === key);
+    }
+
+    add_row() {
+        let row = this.new_row();
+        this.form.expenses.push(row);
+        let $row = $(this.row_html(row, false)).appendTo(this.$body.find(".tp-ec-rows"));
+        this.clear_error(this.$body.find('[data-field="expenses"]'));
+        this.on_form_change();
+        $row[0].scrollIntoView({ block: "nearest", behavior: "smooth" });
+        $row.find(".tp-ec-type").trigger("focus");
+    }
+
+    // --- Footer, validation, Save and Share -------------------------------------------
+
+    render_footer() {
+        let share = (disabled) => `<button type="button" class="btn btn-default tp-ec-share" ${disabled ? "disabled" : ""}>
+            ${frappe.utils.icon("file-spreadsheet", "sm")} <span>${__("Share (Excel)")}</span></button>`;
+        let save = (disabled) => `<button type="button" class="btn btn-primary tp-ec-save" ${disabled ? "disabled" : ""}>
+            ${frappe.utils.icon("save", "sm")} <span>${__("Save")}</span></button>`;
+        // Messages go in the footer, not in a toast: on phones a toast covers these buttons
+        if (this.screen === "list") {
+            // Save here saves every ticket with unsaved changes
+            let unsaved = Object.keys(this.drafts).length;
+            let blocked = !unsaved || (this.list && this.list.employee_missing);
+            this.$footer.html(`
+                <div class="tp-ec-notice" role="status"></div>
+                <div class="tp-ec-actions">
+                    ${share(!(this.list && this.list.tickets.length))}
+                    ${save(blocked)}
+                </div>
+            `);
+            if (this.list_notice) this.notice(this.list_notice.kind, this.list_notice.message);
+            else if (unsaved) this.notice("info", unsaved === 1 ? __("1 ticket has unsaved changes.") : __("{0} tickets have unsaved changes.", [unsaved]));
+            return;
+        }
+        // This ticket's own Save, once it has changes; a submitted claim can't be changed
+        this.$footer.html(`
+            <div class="tp-ec-notice" role="status"></div>
+            <div class="tp-ec-totals">
+                <div class="tp-ec-total-line"><span>${__("Total")}</span><b class="tp-ec-total"></b></div>
+            </div>
+            <div class="tp-ec-actions">${share(false)}${this.is_locked() ? "" : save(this.save_blocked())}</div>
+        `);
+    }
+
+    // The ticket's Save is off until the form has changes (and when no Employee can claim)
+    save_blocked() {
+        return !this.drafts[this.ticket] || !!(this.data && this.data.employee_missing);
+    }
+
+    notice(kind, message) {
+        this.$footer.find(".tp-ec-notice").attr("data-kind", kind || "").text(message || "");
+    }
+
+    set_error($field, message) {
+        $field.children(".tp-ec-error").text(message);
+        this.field_inputs($field).addClass("is-invalid");
+        return $field;
+    }
+
+    clear_error($field) {
+        $field.children(".tp-ec-error").text("");
+        this.field_inputs($field).removeClass("is-invalid");
+    }
+
+    field_inputs($field) {
+        return $field.children("input, select").add($field.children(".tp-ec-datebox").children("input"));
+    }
+
+    // The form's problems, [{field, message, key}] (key: an expense row); the server checks the
+    // same. `check_to`: only the ticket screen knows whether the ticket has a customer address.
+    form_problems(form, check_to) {
+        let found = [];
+        let add = (field, message, key) => found.push({ field, message, key });
+        if (check_to && !this.data.to_location) add("to_location", this.data.to_location_warning || "");
+        if (!form.journey_date) add("journey_date", __("Enter the date of journey."));
+        else if (form.journey_date > frappe.datetime.get_today()) add("journey_date", __("The date can't be in the future."));
+        let days = String(form.no_of_days || "").trim();
+        if (!/^\d+$/.test(days) || +days < 1 || +days > 31) add("no_of_days", __("Enter 1 to 31 days."));
+        if (!(form.from_location || "").trim()) add("from_location", __("Enter where you started from."));
+        if (!form.payable_by_customer) add("payable_by_customer", __("Select Yes or No."));
+        else if (form.payable_by_customer === "Yes") {
+            // what the customer paid the technician: has to be entered, 0 when nothing was paid
+            if (String(form.amount_collected ?? "").trim() === "") add("amount_collected", __("Enter the amount collected (0 if none)."));
+            else if (!this.amount_ok(form.amount_collected, true)) add("amount_collected", __("Enter a valid amount."));
+        }
+        if (!form.expenses.length) add("expenses", __("Add at least one expense."));
+        form.expenses.forEach((e) => {
+            if (!e.expense_type) add("expense_type", __("Select the expense type."), e.key);
+            if (!this.amount_ok(e.amount, false)) add("amount", __("Enter an amount above 0."), e.key);
+        });
+        return found;
+    }
+
+    // Mark the open ticket's problems next to their fields; false when there are any
+    validate() {
+        let $b = this.$body, marked = [], rows = {};
+        $b.find(".tp-ec-field, [data-field], .tp-ec-row").each((i, el) => this.clear_error($(el)));
+        this.form_problems(this.form, true).forEach((p) => {
+            if (p.key) {
+                (rows[p.key] = rows[p.key] || []).push(p);
+                return;
+            }
+            let $field = $b.find(`[data-field="${p.field}"]`);
+            marked.push(p.field === "to_location" ? $field : this.set_error($field, p.message));  // its warning says why
+        });
+        Object.entries(rows).forEach(([key, list]) => {
+            let $row = $b.find(`.tp-ec-row[data-key="${key}"]`);
+            list.forEach((p) => $row.find(p.field === "expense_type" ? ".tp-ec-type" : ".tp-ec-number").addClass("is-invalid"));
+            $row.children(".tp-ec-error").text(list.map((p) => p.message).join(" "));
+            marked.push($row);
+        });
+        if (!marked.length) return true;
+        marked[0][0].scrollIntoView({ block: "center", behavior: "smooth" });
+        this.notice("error", __("Please fix the highlighted fields."));
+        return false;
+    }
+
+    // The list's Save: every ticket with unsaved changes, in one request. Each ticket is saved on
+    // its own (new claim, or its draft updated), so a ticket with a problem is reported and kept
+    // for fixing while the others are saved.
+    save_all() {
+        if (this.saving) return;
+        let tickets = Object.keys(this.drafts);
+        if (!tickets.length) return;
+        let claims = {}, problems = {};
+        tickets.forEach((ticket) => {
+            let draft = this.drafts[ticket];
+            let found = this.form_problems(draft.form, false);
+            if (found.length) problems[ticket] = [...new Set(found.map((p) => p.message))];
+            else claims[ticket] = this.payload(draft.form, draft.modified, draft.period);
+        });
+        if (!Object.keys(claims).length) {
+            this.after_save({}, problems);
+            return;
+        }
+        this.saving = true;
+        let $btn = this.$footer.find(".tp-ec-save").prop("disabled", true);
+        frappe.call({
+            method: TP_EXPENSE_API + "save_expense_claims",
+            args: { claims: JSON.stringify(claims) },
+            freeze: true,
+            freeze_message: __("Saving..."),
+            callback: (r) => {
+                if (!r.message) return;
+                Object.keys(r.message.saved).forEach((ticket) => {
+                    delete this.drafts[ticket];
+                    delete this.problems[ticket];
+                });
+                Object.entries(r.message.errors).forEach(([ticket, message]) => (problems[ticket] = [message]));
+                this.after_save(r.message.saved, problems);
+            },
+            // On an error Frappe shows the server's message and calls only `error`/`always`
+            always: () => {
+                this.saving = false;
+                $btn.prop("disabled", false);
+            },
+        });
+    }
+
+    // The ticket screen's Save: this ticket only (the list's Save does every ticket with changes).
+    // It stays on the ticket with the saved claim; a refusal by the server is shown here, and the
+    // edits are kept.
+    save_ticket() {
+        if (this.saving || !this.data || !this.form || this.is_locked()) return;
+        if (this.stale) {
+            this.notice("error", __("This claim was changed after you started editing it, so your changes can't be saved over it."));
+            let banner = this.$body.find(".tp-ec-discard").closest(".tp-ec-banner")[0];
+            if (banner) banner.scrollIntoView({ block: "center", behavior: "smooth" });
+            return;
+        }
+        if (!this.validate()) return;
+        let ticket = this.ticket;
+        this.saving = true;
+        let $btn = this.$footer.find(".tp-ec-save").prop("disabled", true);
+        frappe.call({
+            method: TP_EXPENSE_API + "save_expense_claims",
+            args: { claims: JSON.stringify({ [ticket]: this.payload(this.form, this.draft_modified, this.period) }) },
+            freeze: true,
+            freeze_message: __("Saving..."),
+            callback: (r) => {
+                if (!r.message) return;
+                let claim = r.message.saved[ticket], message = r.message.errors[ticket] || __("Could not be saved.");
+                if (claim) {
+                    delete this.drafts[ticket];
+                    delete this.problems[ticket];
+                } else {
+                    this.problems[ticket] = [message];
+                }
+                if (this.screen !== "ticket" || this.ticket !== ticket) return;  // the popup was left meanwhile
+                if (claim) {
+                    // What was saved is the form now
+                    this.data.claim = claim;
+                    this.base = this.form_from_data(this.data);
+                    this.form = JSON.parse(JSON.stringify(this.base));
+                    this.draft_modified = claim.modified;
+                    this.stale = false;
+                    this.render_ticket();
+                    this.notice("success", __("Saved."));
+                } else {
+                    this.render_ticket();  // adds the "Not saved: …" banner
+                    this.notice("error", message);
+                }
+            },
+            // On an error Frappe shows the server's message and calls only `error`/`always`
+            always: () => {
+                this.saving = false;
+                $btn.prop("disabled", this.screen === "ticket" ? this.save_blocked() : false);
+            },
+        });
+    }
+
+    after_save(saved, problems) {
+        Object.assign(this.problems, problems);
+        let count = Object.keys(saved).length, skipped = Object.keys(problems);
+        let parts = [];
+        if (count) parts.push(count === 1 ? __("Saved 1 ticket.") : __("Saved {0} tickets.", [count]));
+        if (skipped.length) parts.push(__("Not saved: {0}. Open them to see what needs fixing.", [skipped.join(", ")]));
+        this.list_notice = { kind: skipped.length ? "error" : "success", message: parts.join(" ") };
+        if (this.screen === "list") {
+            this.mark_period();  // dates still being fixed go back to the list's
+            this.load_list();  // fresh claims and totals
+        }
+    }
+
+    share() {
+        let drafts = {}, args;
+        if (this.screen === "list") {
+            if (!this.list || !this.list.tickets.length) return;
+            this.list.tickets.forEach((t) => {
+                let draft = this.drafts[t.name];
+                if (draft) drafts[t.name] = this.payload(draft.form, draft.modified, draft.period);
+            });
+            args = { from_date: this.list.from_date, to_date: this.list.to_date };
+        } else {
+            if (!this.data) return;
+            // Unsaved values are exported as they are, but amounts have to be numbers
+            let f = this.form;
+            let bad = f.expenses.some((e) => e.amount !== "" && !this.amount_ok(e.amount, true))
+                || (f.payable_by_customer === "Yes" && !this.amount_ok(f.amount_collected, true));
+            if (bad) {
+                this.validate();
+                return;
+            }
+            if (this.drafts[this.ticket]) drafts[this.ticket] = this.payload(f, this.draft_modified, this.period);
+            args = { ticket: this.ticket };
+        }
+        args.drafts = JSON.stringify(drafts);
+        this.download(TP_EXPENSE_API + "download_expense_claim_excel", args);
+    }
+
+    // POST and save the file; on an error show the server's message instead of leaving the page
+    async download(method, args) {
+        let $btn = this.$footer.find(".tp-ec-share").prop("disabled", true);
+        try {
+            let res = await fetch(`/api/method/${method}`, {
+                method: "POST",
+                headers: { "X-Frappe-CSRF-Token": frappe.csrf_token, Accept: "application/json" },
+                body: new URLSearchParams(args),
+            });
+            if (!res.ok) throw new Error(await this.error_message(res));
+            let blob = await res.blob();
+            let match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get("Content-Disposition") || "");
+            let url = URL.createObjectURL(blob);
+            let a = document.createElement("a");
+            a.href = url;
+            a.download = match ? decodeURIComponent(match[1]) : "expense_claim.xlsx";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+        } catch (e) {
+            frappe.msgprint({ title: __("Share (Excel)"), message: e.message || __("The Excel file could not be made."), indicator: "red" });
+        } finally {
+            $btn.prop("disabled", false);
+        }
+    }
+
+    async error_message(res) {
+        try {
+            let data = await res.json();
+            let messages = JSON.parse(data._server_messages || "[]").map((m) => {
+                try { return JSON.parse(m).message; } catch (e) { return m; }
+            });
+            if (messages.length) return messages.join("<br>");
+        } catch (e) {
+            // not JSON
+        }
+        return __("The Excel file could not be made.");
+    }
+
+    // --- Events -----------------------------------------------------------------------
+
+    bind_events() {
+        let $b = this.$body;
+        $b.on("click", "[data-range]", (e) => {
+            let today = frappe.datetime.get_today();
+            let from_date = e.currentTarget.getAttribute("data-range") === "last_week" ? frappe.datetime.add_days(today, -6) : today;
+            if (from_date !== this.from_date || today !== this.to_date) this.set_period(from_date, today);
+            else this.mark_period();  // e.g. after dates that couldn't be listed
+        });
+        $b.on("change", ".tp-ec-date", () => {
+            let from_date = $b.find('[data-date="from"]').val(), to_date = $b.find('[data-date="to"]').val();
+            let problem = this.period_problem(from_date, to_date);
+            // While a date is being typed it can be wrong for a moment: say so, keep what's typed
+            $b.find(".tp-ec-date").toggleClass("is-invalid", !!problem);
+            if (problem) {
+                this.list = null;
+                this.list_seq = (this.list_seq || 0) + 1;  // an answer still on its way is not shown
+                $b.find(".tp-ec-list-wrap").html(`<div class="tp-ec-empty tp-ec-date-problem" role="alert">${this.esc(problem)}</div>`);
+                this.render_footer();
+                return;
+            }
+            if (from_date !== this.from_date || to_date !== this.to_date || !this.list) this.set_period(from_date, to_date);
+        });
+        $b.on("click", ".tp-ec-list-row", (e) => this.open_ticket(e.currentTarget.getAttribute("data-ticket")));
+        $b.on("keydown", ".tp-ec-list-row", (e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
+            this.open_ticket(e.currentTarget.getAttribute("data-ticket"));
+        });
+        $b.on("click", ".tp-ec-back", () => this.show_list());
+        $b.on("click", ".tp-ec-ticket-link", (e) => {
+            e.preventDefault();
+            let ticket = this.ticket;
+            this.dialog.hide();
+            this.portal.open_ticket_details(ticket);
+        });
+        $b.on("click", ".tp-ec-discard", () => {
+            delete this.drafts[this.ticket];
+            delete this.problems[this.ticket];
+            this.open_ticket(this.ticket);
+        });
+
+        $b.on("input change", ".tp-ec-datebox input", (e) => this.show_date(e.currentTarget));
+        $b.on("click", ".tp-ec-datebox input", (e) => {
+            if (this.touch) return;  // a tap opens the phone's picker by itself
+            try {
+                e.currentTarget.showPicker();
+            } catch (err) {
+                // an older browser: the calendar button still works
+            }
+        });
+        $b.on("input change", "[data-bind]", (e) => {
+            let name = e.currentTarget.getAttribute("data-bind");
+            this.form[name] = e.currentTarget.value;
+            this.clear_error($(e.currentTarget).closest(".tp-ec-field"));
+            if (name === "payable_by_customer") {
+                $b.find('[data-field="amount_collected"]').prop("hidden", this.form[name] !== "Yes");
+            }
+            this.on_form_change();
+        });
+        $b.on("input change", "[data-row]", (e) => {
+            let $row = $(e.currentTarget).closest(".tp-ec-row");
+            let row = this.find_row($row.attr("data-key"));
+            if (!row) return;
+            row[e.currentTarget.getAttribute("data-row")] = e.currentTarget.value;
+            $(e.currentTarget).removeClass("is-invalid");
+            if (!$row.find(".is-invalid").length) $row.children(".tp-ec-error").text("");
+            this.on_form_change();
+        });
+        $b.on("click", ".tp-ec-del", (e) => {
+            let $row = $(e.currentTarget).closest(".tp-ec-row");
+            this.form.expenses = this.form.expenses.filter((row) => row.key !== $row.attr("data-key"));
+            $row.remove();
+            this.on_form_change();
+        });
+        $b.on("click", ".tp-ec-add", () => this.add_row());
+
+        // Without stepper arrows, don't let the mouse wheel change an amount by accident
+        $b.on("wheel", "input[type=number]", (e) => {
+            if (document.activeElement === e.currentTarget) e.currentTarget.blur();
+        });
+        // Phones: keep the field being typed in clear of the keyboard and the footer
+        $b.on("focusin", "input, select", (e) => {
+            if (!this.touch) return;
+            setTimeout(() => e.target.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
+        });
+
+        this.$footer.on("click", ".tp-ec-share", () => this.share());
+        this.$footer.on("click", ".tp-ec-save", () => (this.screen === "list" ? this.save_all() : this.save_ticket()));
     }
 }

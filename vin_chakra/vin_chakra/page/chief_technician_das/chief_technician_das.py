@@ -1,19 +1,61 @@
 import json
 
 import frappe
+from vin_chakra.api import get_branches
 from vin_chakra.technician_api import enrich_tickets_customer_details
 
 # Whose attendance the Attendance tab shows; the first one is the default
 ATTENDANCE_PERSON_TYPES = ("Technician", "Sales Person")
 
 
+def get_allowed_branches(user=None):
+    """(branches, default) the user is limited to on this dashboard, or (None, None) when they may
+    see every branch. The limit is the user's User Permissions on Branch (set by hand, e.g. a Chief
+    Technician kept to Chennai), read the way Frappe applies them to HD Ticket's Branch field; the
+    default is the one marked default there, or the only one."""
+    branch_permissions = frappe.permissions.get_user_permissions(user or frappe.session.user).get("Branch") or []
+    allowed, default = frappe.permissions.filter_allowed_docs_for_doctype(branch_permissions, "HD Ticket")
+    return (sorted(allowed), default) if allowed else (None, None)
+
+
 def get_branch_filter(branch):
-    """The Branch to filter on, or None for All Branches. A Branch that does not exist is refused."""
+    """The Branches to filter on: the chosen one, else every branch the user is limited to, else
+    None for All Branches. A Branch that does not exist, or that the user may not see, is refused."""
+    allowed = get_allowed_branches()[0]
     if branch in (None, "", "None", "null", "undefined"):
-        return None
+        return allowed
     if not frappe.db.exists("Branch", branch):
         frappe.throw("The selected Branch does not exist.")
-    return branch
+    if allowed is not None and branch not in allowed:
+        frappe.throw(f"You are not permitted to view Branch {frappe.utils.escape_html(branch)}.", frappe.PermissionError)
+    return [branch]
+
+
+@frappe.whitelist()
+def get_branch_options() -> dict:
+    """The Branch filter's choices for the current user and the branch the dashboard opens on.
+
+    A user limited to some branches gets only those. The default is the branch on the user's
+    Active Employee record when they may see it, else their default Branch User Permission, else
+    the first branch they are limited to; None (All Branches) when none of these applies.
+    """
+    if not (frappe.has_permission("HD Ticket", "read") and ("Chief Technician" in frappe.get_roles() or "System Manager" in frappe.get_roles())):
+        frappe.throw("You are not permitted to access this dashboard.")
+
+    allowed, permission_default = get_allowed_branches()
+    employee_branch = frappe.db.get_value("Employee", {"user_id": frappe.session.user, "status": "Active"}, "branch")
+    if employee_branch and (allowed is None or employee_branch in allowed):
+        default_branch = employee_branch
+    elif allowed:
+        default_branch = permission_default or allowed[0]
+    else:
+        default_branch = None
+
+    return {
+        "branches": allowed if allowed is not None else get_branches(),
+        "restricted": allowed is not None,
+        "default_branch": default_branch,
+    }
 
 
 @frappe.whitelist()
@@ -56,7 +98,7 @@ def get_dashboard_data(
     search_query = search_query if search_query not in (None, "", "None", "null", "undefined") else None
     person_type = person_type if person_type not in (None, "", "None", "null", "undefined") else None
     sales_person = sales_person if sales_person not in (None, "", "None", "null", "undefined") else None
-    branch = get_branch_filter(branch)
+    branches = get_branch_filter(branch)
 
         
     # Construct base conditions for HD Tickets
@@ -99,9 +141,9 @@ def get_dashboard_data(
     if ticket_type:
         summary_conditions.append("ticket_type = %(ticket_type)s")
         summary_values["ticket_type"] = ticket_type
-    if branch:
-        summary_conditions.append("custom_branch = %(branch)s")
-        summary_values["branch"] = branch
+    if branches:
+        summary_conditions.append("custom_branch IN %(branches)s")
+        summary_values["branches"] = tuple(branches)
     if search_query:
         search_escaped = f"%{search_query}%"
         summary_conditions.append("(name LIKE %(search)s OR subject LIKE %(search)s OR custom_customer_name LIKE %(search)s OR customer LIKE %(search)s)")
@@ -230,7 +272,10 @@ def get_dashboard_data(
             search_escaped = f"%{search_query}%"
             movement_conditions.append("(t.name LIKE %(search)s OR t.subject LIKE %(search)s OR t.custom_customer_name LIKE %(search)s)")
             movement_values["search"] = search_escaped
-            
+        if branches:
+            movement_conditions.append("t.custom_branch IN %(branches)s")
+            movement_values["branches"] = tuple(branches)
+
         movement_where = " AND ".join(movement_conditions)
         
         movement = frappe.db.sql(f"""
@@ -301,9 +346,9 @@ def get_dashboard_data(
             attendance_conditions.append("DATE(ec.time) <= %(date_to)s")
             attendance_values["date_to"] = date_to
         # Check-ins have no ticket, so this is the branch on the person's Employee record
-        if branch:
-            attendance_conditions.append("e.branch = %(branch)s")
-            attendance_values["branch"] = branch
+        if branches:
+            attendance_conditions.append("e.branch IN %(branches)s")
+            attendance_values["branches"] = tuple(branches)
 
         if person_type == "Technician":
             if technician:
@@ -416,14 +461,20 @@ def get_technician_map_data(date, technician=None, customer=None, ticket_status=
     if ticket_status in (None, "None", "null", "undefined"):
         ticket_status = None
 
-        
+    # The map has no Branch filter, but a user limited to some branches only sees visits to
+    # those branches' tickets
+    allowed_branches = get_allowed_branches()[0]
+
     result = {}
 
     # 1. Without technician: Latest check log for each technician on the date
     if not technician:
         conditions = ["DATE(cl.timestamp) = %(date)s", "cl.latitude IS NOT NULL", "cl.longitude IS NOT NULL"]
         values = {"date": date_str}
-        
+        if allowed_branches:
+            conditions.append("t.custom_branch IN %(branches)s")
+            values["branches"] = tuple(allowed_branches)
+
         if customer:
             conditions.append("t.custom_customer_name = %(customer)s")
             values["customer"] = customer
@@ -472,7 +523,10 @@ def get_technician_map_data(date, technician=None, customer=None, ticket_status=
     else:
         conditions = ["DATE(cl.timestamp) = %(date)s", "cl.technician = %(technician)s"]
         values = {"date": date_str, "technician": technician}
-        
+        if allowed_branches:
+            conditions.append("t.custom_branch IN %(branches)s")
+            values["branches"] = tuple(allowed_branches)
+
         if customer:
             conditions.append("(t.custom_customer_name = %(customer)s OR t.customer = %(customer)s)")
             values["customer"] = customer
