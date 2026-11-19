@@ -43,7 +43,7 @@ class ChiefTechnicianDashboard {
             status: "",
             priority: "",
             ticket_type: "",
-            branch: "", // applies to every tab, the Technician Map included
+            branch: "", // Ticket Board, Analytics and Attendance ("" = All Branches)
             // Attendance tab only: whose attendance is shown, and the selected Sales Person
             person_type: "Technician",
             sales_person: ""
@@ -72,7 +72,13 @@ class ChiefTechnicianDashboard {
         this.leaflet_markers = [];
         this.leaflet_polylines = [];
         this._open_info_window = null;
+        // Branch filter choices, from get_branch_options. Data waits for them, so the page opens
+        // on the user's own branch: their Employee record's, or their User Permission's.
         this.branches = [];
+        this.default_branch = ""; // the user's own branch; "" = All Branches
+        this.branch_restricted = false; // limited to `branches` by User Permissions
+        this.branch_options_loaded = false;
+        this.branch_in_url = false; // a Branch (or "branch=", All Branches) was in the URL
         this.tech_control = null;
         this.sales_person_control = null;
         this.ticket_type_control = null;
@@ -128,7 +134,11 @@ class ChiefTechnicianDashboard {
         this.filters.status = params.get("status") || "";
         this.filters.priority = params.get("priority") || "";
         this.filters.ticket_type = params.get("ticket_type") || "";
-        this.filters.branch = params.get("branch") || "";
+        // No branch in the URL means the page was opened afresh: use the user's own branch.
+        // "branch=" (empty) is All Branches chosen on purpose, kept when coming back.
+        this.branch_in_url = params.has("branch");
+        this.filters.branch = this.branch_in_url ? (params.get("branch") || "") : this.default_branch;
+        if (this.branch_options_loaded) this.check_branch_filter();
         // A Sales Person is only restored together with its Person Type, so it can never
         // be picked up as a filter while Technician attendance is shown
         this.filters.person_type = params.get("person_type") === "Sales Person" ? "Sales Person" : "Technician";
@@ -163,7 +173,14 @@ class ChiefTechnicianDashboard {
         if (this.filters.status) params.set("status", this.filters.status); else params.delete("status");
         if (this.filters.priority) params.set("priority", this.filters.priority); else params.delete("priority");
         if (this.filters.ticket_type) params.set("ticket_type", this.filters.ticket_type); else params.delete("ticket_type");
-        if (this.filters.branch) params.set("branch", this.filters.branch); else params.delete("branch");
+        // All Branches is written as "branch=" when the user has a branch of their own, so that
+        // coming back to the page doesn't switch to it (no branch in the URL = their branch).
+        // Until their branch is known, the URL's branch is left as it is.
+        if (this.branch_options_loaded) {
+            if (this.filters.branch) params.set("branch", this.filters.branch);
+            else if (this.default_branch) params.set("branch", "");
+            else params.delete("branch");
+        }
         // Person Type is only kept in the URL when it isn't the default (Technician)
         if (this.filters.person_type === "Sales Person") params.set("person_type", this.filters.person_type); else params.delete("person_type");
         if (this.filters.sales_person) params.set("sales_person", this.filters.sales_person); else params.delete("sales_person");
@@ -206,21 +223,54 @@ class ChiefTechnicianDashboard {
         if (this.filters.branch && !branches.includes(this.filters.branch)) {
             branches.push(this.filters.branch);
         }
-        let options_html = '<option value="">All Branches</option>' + branches.map(branch => {
+        let options_html = (this.can_show_all_branches() ? '<option value="">All Branches</option>' : "") + branches.map(branch => {
             let value = frappe.utils.escape_html(branch);
             return `<option value="${value}">${value}</option>`;
         }).join("");
         this.wrapper.find("#ct-filter-branch").html(options_html).val(this.filters.branch);
     }
 
+    // A user limited to one branch has no All Branches; limited to several, All Branches is all of
+    // theirs (the server applies the same limit)
+    can_show_all_branches() {
+        return !this.branch_restricted || this.branches.length > 1;
+    }
+
+    // The Branch filter's choices and the user's own branch. The first data load waits for them,
+    // so a page opened afresh shows the user's branch straight away.
     load_branches() {
+        let apply = (options) => {
+            this.branches = options.branches || [];
+            this.branch_restricted = !!options.restricted;
+            this.default_branch = options.default_branch || "";
+            this.branch_options_loaded = true;
+            if (!this.branch_in_url) this.filters.branch = this.default_branch;
+            this.check_branch_filter();
+            this.sync_branch_filter_controls();
+            this.update_url(false);
+            this.load_data();
+        };
         frappe.call({
-            method: "vin_chakra.api.get_branches",
-            callback: (r) => {
-                this.branches = r.message || [];
-                this.sync_branch_filter_controls();
-            }
+            method: "vin_chakra.vin_chakra.page.chief_technician_das.chief_technician_das.get_branch_options",
+            callback: (r) => apply(r.message || {}),
+            // Still show the dashboard; the server applies the user's branch limit regardless
+            error: () => apply({})
         });
+    }
+
+    // A link to a branch the user may not see (or All Branches, for a user limited to one branch)
+    // falls back to their own branch instead of failing on the server
+    check_branch_filter() {
+        if (!this.branch_restricted) return;
+        let branch = this.filters.branch;
+        if (branch ? this.branches.includes(branch) : this.can_show_all_branches()) return;
+        if (branch) {
+            frappe.show_alert({
+                message: __("You can't view Branch {0}; showing {1}.", [frappe.utils.escape_html(branch), frappe.utils.escape_html(this.default_branch)]),
+                indicator: "orange"
+            });
+        }
+        this.filters.branch = this.default_branch;
     }
 
     set_branch(branch) {
@@ -1254,7 +1304,10 @@ class ChiefTechnicianDashboard {
     load_data() {
         this.render_active_filters();
         this.wrapper.find("#ct-loader").show();
-        
+        // Until the Branch options are in, the user's own branch isn't known; load_branches()
+        // loads the data once they are
+        if (!this.branch_options_loaded) return;
+
         if (this.current_tab === "tickets") {
             this.load_tickets_data();
         } else if (this.current_tab === "analytics") {
@@ -2247,7 +2300,8 @@ class ChiefTechnicianDashboard {
         let sales_person_mode = this.current_tab === "attendance" && this.filters.person_type === "Sales Person";
 
         let pills_html = "";
-        if (panel_tab && this.filters.branch) pills_html += `<span class="ct-filter-pill">Branch: ${frappe.utils.escape_html(this.filters.branch)} <i class="fa fa-times ct-filter-remove" data-key="branch"></i></span>`;
+        // A user limited to one branch can't remove it
+        if (panel_tab && this.filters.branch) pills_html += `<span class="ct-filter-pill">Branch: ${frappe.utils.escape_html(this.filters.branch)} ${this.can_show_all_branches() ? '<i class="fa fa-times ct-filter-remove" data-key="branch"></i>' : ""}</span>`;
         if (panel_tab && this.filters.date_from) pills_html += `<span class="ct-filter-pill">From: ${this.filters.date_from} <i class="fa fa-times ct-filter-remove" data-key="date_from"></i></span>`;
         if (panel_tab && this.filters.date_to) pills_html += `<span class="ct-filter-pill">To: ${this.filters.date_to} <i class="fa fa-times ct-filter-remove" data-key="date_to"></i></span>`;
         if (panel_tab && this.filters.technician && !sales_person_mode) {
@@ -2350,15 +2404,16 @@ class ChiefTechnicianDashboard {
         this.load_data();
     }
 
-    // Reset everything the Attendance tab filters on. Status, Priority, Ticket Type and the
-    // search box only apply to the other tabs and are left as they are.
+    // Reset everything the Attendance tab filters on; Branch goes back to the user's own branch.
+    // Status, Priority, Ticket Type and the search box only apply to the other tabs and are left
+    // as they are.
     clear_attendance_filters() {
         this.filters.date_from = "";
         this.filters.date_to = "";
         this.filters.person_type = "Technician";
         this.filters.technician = "";
         this.filters.sales_person = "";
-        this.filters.branch = "";
+        this.filters.branch = this.default_branch;
         this.wrapper.find("#ct-filter-date-from, #ct-filter-date-to").val("");
         this.sync_person_filter_controls();
         this.sync_branch_filter_controls();
@@ -2367,7 +2422,8 @@ class ChiefTechnicianDashboard {
     }
 
     // Reset everything the Ticket Board and Analytics filter on: the filter panel and the ticket
-    // search. The Attendance-only Person Type / Sales Person and the map filters are kept.
+    // search, with Branch back to the user's own branch. The Attendance-only Person Type /
+    // Sales Person and the map filters are kept.
     clear_ticket_filters() {
         clearTimeout(this.debounce_timer); // a search still being typed must not be applied afterwards
         this.filters.date_from = "";
@@ -2376,7 +2432,7 @@ class ChiefTechnicianDashboard {
         this.filters.status = "";
         this.filters.priority = "";
         this.filters.ticket_type = "";
-        this.filters.branch = "";
+        this.filters.branch = this.default_branch;
         this.search_query = "";
         this.sync_ui_from_state();
         this.reset_pagination(); // also drops the cleared values from the URL

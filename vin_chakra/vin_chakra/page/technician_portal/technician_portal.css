@@ -671,94 +671,6 @@
     color: var(--tp-text-muted);
 }
 
-/* Expense Claim dialog */
-.tp-expense-dialog .modal-dialog {
-    max-width: min(1100px, calc(100vw - 32px));
-}
-
-.tp-expense-toolbar {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-bottom: 12px;
-}
-
-.tp-expense-toolbar .tp-view-btn {
-    white-space: nowrap;
-}
-
-.tp-expense-period {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--tp-text-muted);
-}
-
-.tp-expense-toolbar .tp-expense-share {
-    margin-left: auto;
-}
-
-.tp-expense-table-wrap {
-    max-height: 60vh;
-    overflow: auto;
-}
-
-.tp-expense-table {
-    width: 100%;
-    margin-bottom: 0;
-    font-size: 13px;
-}
-
-.tp-expense-table td {
-    vertical-align: middle;
-}
-
-.tp-expense-table .tp-expense-total {
-    text-align: right;
-    white-space: nowrap;
-}
-
-.tp-expense-input {
-    width: 110px;
-    text-align: right;
-    -moz-appearance: textfield;
-    appearance: textfield;
-}
-
-/* No stepper arrows on the amount boxes */
-.tp-expense-input::-webkit-outer-spin-button,
-.tp-expense-input::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-}
-
-.tp-expense-type {
-    min-width: 120px;
-}
-
-.tp-expense-input.is-dirty,
-.tp-expense-type.is-dirty {
-    border-color: var(--tp-warning);
-    background-color: #fffbeb;
-}
-
-.tp-expense-input.is-invalid,
-.tp-expense-type.is-invalid {
-    border-color: var(--tp-danger);
-}
-
-.tp-expense-empty {
-    padding: 24px;
-    text-align: center;
-    color: var(--tp-text-muted);
-}
-
-.tp-expense-hint {
-    margin-top: 8px;
-    font-size: 12px;
-    color: var(--tp-text-muted);
-}
-
 /* Responsive tweaks */
 @media (max-width: 900px) {
     .tp-ticket-list-row {
@@ -825,60 +737,6 @@
     }
 }
 
-/* Expense Claim on phones and tablets: one stacked card per ticket instead of a wide table
-   (the 9-column table needs a popup of about 940px) */
-@media (max-width: 991px) {
-    .tp-expense-table,
-    .tp-expense-table tbody,
-    .tp-expense-table tfoot {
-        display: block;
-        border: none;
-    }
-    .tp-expense-table thead {
-        display: none;
-    }
-    .tp-expense-table tbody tr {
-        display: block;
-        margin-bottom: 10px;
-        padding: 4px 0;
-        border: 1px solid var(--tp-border);
-        border-radius: 8px;
-    }
-    .tp-expense-table tbody td {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 4px 12px;
-        border: none;
-        text-align: right;
-    }
-    .tp-expense-table tbody td::before {
-        content: attr(data-label);
-        font-weight: 600;
-        color: var(--tp-text-muted);
-        text-align: left;
-    }
-    .tp-expense-table tbody td .tp-expense-type {
-        flex: 0 0 auto;
-        width: 150px;
-    }
-    .tp-expense-table tbody td.tp-expense-empty {
-        justify-content: center;
-    }
-    .tp-expense-table tbody td.tp-expense-empty::before {
-        content: none;
-    }
-    .tp-expense-table tfoot tr {
-        display: flex;
-        justify-content: space-between;
-        padding: 0 12px;
-    }
-    .tp-expense-table tfoot th {
-        border: none;
-    }
-}
-
 @media (max-width: 480px) {
     .tp-summary-row {
         grid-template-columns: repeat(2, 1fr);
@@ -894,5 +752,527 @@
     }
     .tp-welcome-banner h2 {
         font-size: 18px;
+    }
+}
+
+/* Expense Claim popup (TechnicianExpenseClaim in technician_portal.js): one layout for every
+   width. The header and the footer (totals, Share, Save) stay put and only the body scrolls,
+   so the buttons stay in reach with a long form or a phone keyboard open. */
+.tp-ec-dialog .modal-dialog {
+    max-width: 560px;
+}
+.tp-ec-dialog .modal-content {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 3.5rem);
+    max-height: calc(100dvh - 3.5rem);
+}
+.tp-ec-dialog .modal-header,
+.tp-ec-dialog .modal-footer {
+    flex-shrink: 0;
+}
+.tp-ec-dialog .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.tp-ec-dialog .modal-footer {
+    display: block;
+    padding: 10px 16px;
+}
+.tp-ec-dialog .modal-footer .custom-actions {
+    display: block;
+    width: 100%;
+    margin: 0;
+}
+
+.tp-ec-toolbar {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 10px 12px;
+    margin-bottom: 12px;
+}
+.tp-ec-toolbar .tp-view-btn {
+    white-space: nowrap;
+}
+/* From and To: next to Today / Last 1 Week when there is room, else on their own line */
+.tp-ec-dates {
+    flex: 1 1 17rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+    max-width: 24rem;
+}
+.tp-ec-date-field {
+    margin: 0;
+    min-width: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--tp-text-muted);
+}
+.tp-ec-date-field > span {
+    display: block;
+    margin-bottom: 4px;
+}
+.tp-ec-toolbar .tp-ec-date {
+    width: 100%;
+    min-width: 0;
+    padding-left: 8px;
+    padding-right: 6px;
+    font-weight: 600;
+    color: var(--tp-text-main);
+}
+/* Date inputs show dd-mm-yyyy (the system format) over the browser's own text, which follows
+   the browser's language (11/18/2026 in English) */
+.tp-ec-datebox {
+    position: relative;
+}
+.tp-ec-datebox input::-webkit-datetime-edit,
+.tp-ec-datebox input::-webkit-date-and-time-value {
+    opacity: 0;
+}
+@supports (-moz-appearance: none) {
+    .tp-ec-datebox input {
+        color: transparent;
+    }
+}
+.tp-ec-datebox-text {
+    position: absolute;
+    left: 8px;
+    right: 30px;
+    top: 50%;
+    transform: translateY(-50%);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    font-size: var(--text-base);
+    color: var(--tp-text-main);
+}
+.tp-ec-datebox-text.is-empty {
+    color: var(--tp-text-muted);
+    font-weight: 400;
+}
+.tp-ec-datebox input:disabled + .tp-ec-datebox-text {
+    color: var(--disabled-text-color, var(--tp-text-muted));
+}
+.tp-ec-toolbar .tp-ec-datebox-text {
+    font-weight: 600;
+}
+.tp-ec-empty.tp-ec-date-problem {
+    color: var(--tp-danger);
+}
+
+/* Ticket list */
+.tp-ec-list {
+    margin-bottom: 0;
+    font-size: 13px;
+}
+.tp-ec-list th {
+    font-size: 12px;
+    color: var(--tp-text-muted);
+}
+.tp-ec-list td {
+    vertical-align: middle;
+}
+.tp-ec-list-row {
+    cursor: pointer;
+}
+.tp-ec-list-row:hover,
+.tp-ec-list-row:focus-visible {
+    background: var(--tp-primary-light);
+    outline: none;
+}
+.tp-ec-list .tp-ec-claimed {
+    width: 1%;
+    text-align: right;
+    white-space: nowrap;
+}
+.tp-ec-list td.tp-ec-claimed {
+    border-right: 0;
+}
+.tp-ec-list .tp-ec-go {
+    width: 1%;
+    padding-left: 0;
+    border-left: 0;
+    color: var(--tp-text-light);
+    --icon-stroke: currentColor;
+}
+.tp-ec-ticket-no {
+    font-weight: 700;
+    color: var(--tp-primary);
+}
+.tp-ec-customer {
+    margin-top: 2px;
+    font-weight: 600;
+    color: var(--tp-text-main);
+    overflow-wrap: anywhere;  /* a long one-word name must not widen the popup */
+}
+.tp-ec-meta {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--tp-text-muted);
+}
+.tp-ec-amount {
+    font-weight: 700;
+    color: var(--tp-text-main);
+}
+.tp-ec-chip {
+    display: inline-block;
+    margin-top: 2px;
+    padding: 1px 8px;
+    border: 1px solid var(--tp-border);
+    border-radius: 10px;
+    background: var(--tp-bg);
+    color: var(--tp-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.tp-ec-chip[hidden] {
+    display: none;
+}
+.tp-ec-chip.is-draft {
+    border-color: transparent;
+    background: var(--tp-primary-light);
+    color: var(--tp-primary-dark);
+}
+.tp-ec-chip.is-locked {
+    border-color: transparent;
+    background: #ecfdf5;
+    color: var(--tp-success);
+}
+.tp-ec-chip.is-unsaved {
+    border-color: #fcd34d;
+    background: #fffbeb;
+    color: #b45309;
+}
+.tp-ec-chip.is-problem {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: var(--tp-danger);
+}
+.tp-ec-empty {
+    padding: 24px 12px;
+    text-align: center;
+    color: var(--tp-text-muted);
+}
+.tp-ec-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--tp-text-muted);
+}
+.tp-ec-banner {
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+}
+.tp-ec-banner.is-warning {
+    border: 1px solid #fcd34d;
+    background: #fffbeb;
+    color: #92400e;
+}
+.tp-ec-banner.is-danger {
+    border: 1px solid #fecaca;
+    background: #fef2f2;
+    color: #991b1b;
+}
+.tp-ec-banner.is-info {
+    border: 1px solid #c7d2fe;
+    background: var(--tp-primary-light);
+    color: #3730a3;
+}
+.tp-ec-banner .btn {
+    margin-top: 4px;
+}
+
+/* Ticket screen */
+.tp-ec-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    min-height: 36px;
+    margin: -4px 0 6px;
+    padding: 0;
+    font-weight: 600;
+    color: var(--tp-primary);
+    --icon-stroke: currentColor;
+}
+.tp-ec-section {
+    padding: 12px 0;
+}
+.tp-ec-section + .tp-ec-section {
+    border-top: 1px solid var(--tp-border);
+}
+.tp-ec-section-title {
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--tp-text-muted);
+}
+.tp-ec-ticket-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.tp-ec-ticket-link {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--tp-primary);
+}
+.tp-ec-pill {
+    padding: 1px 8px;
+    border: 1px solid var(--tp-border);
+    border-radius: 10px;
+    background: var(--tp-bg);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--tp-text-muted);
+}
+.tp-ec-field {
+    min-width: 0;
+    margin-top: 10px;
+}
+.tp-ec-field[hidden] {
+    display: none;
+}
+.tp-ec-label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--tp-text-muted);
+}
+.tp-ec-req {
+    color: var(--tp-danger);
+}
+.tp-ec-error {
+    margin-top: 3px;
+    font-size: 12px;
+    color: var(--tp-danger);
+}
+.tp-ec-error:empty {
+    display: none;
+}
+.tp-ec .form-control.is-invalid {
+    border-color: var(--tp-danger);
+}
+/* Frappe draws selects without an arrow; show one so they read as dropdowns */
+.tp-ec select.form-control {
+    padding-left: 10px;
+    padding-right: 26px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 14px;
+    text-overflow: ellipsis;
+}
+.tp-ec select.form-control:disabled {
+    background-image: none;
+}
+/* Frappe centres icons with auto margins, which pushes a button's icon and label apart */
+.tp-ec .icon,
+.tp-ec-footer .icon {
+    flex-shrink: 0;
+    margin: 0;
+}
+.tp-ec-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0 10px;
+}
+.tp-ec-grid.is-date {
+    grid-template-columns: minmax(0, 1fr) 6rem;
+}
+.tp-ec-to,
+.tp-ec-static {
+    padding: 8px 10px;
+    border: 1px solid var(--tp-border);
+    border-radius: 8px;
+    background: var(--tp-bg);
+}
+/* The customer's address and the ticket's call type (read-only) */
+.tp-ec-to-place,
+.tp-ec-static {
+    font-weight: 600;
+    color: var(--tp-text-main);
+    overflow-wrap: anywhere;
+}
+.tp-ec-static.is-empty {
+    font-weight: 400;
+    color: var(--tp-text-muted);
+}
+.tp-ec-no-location {
+    margin-bottom: 0;
+}
+.tp-ec-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+/* Expense row: type | amount | delete on one line. Measured at 360px (312px for the row,
+   16px text): "Bus / Train Fare" needs 160px with the arrow, "10000.00" 94px with the slim
+   padding, the delete button 40px and the gaps 12px, so everything fits from 360px up */
+.tp-ec-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 6rem 2.5rem;
+    gap: 4px 6px;
+    align-items: center;
+}
+.tp-ec-row.is-locked {
+    grid-template-columns: minmax(0, 1fr) 6rem;
+}
+.tp-ec-row .tp-ec-number {
+    padding-left: 8px;
+    padding-right: 8px;
+}
+.tp-ec-row > .tp-ec-error {
+    grid-column: 1 / -1;
+    margin-top: 0;
+}
+.tp-ec-number {
+    text-align: right;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+/* No stepper arrows on the amount boxes */
+.tp-ec-number::-webkit-outer-spin-button,
+.tp-ec-number::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.tp-ec-del {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 100%;
+    min-height: 32px;
+    padding: 0;
+    border: 1px solid var(--tp-border);
+    background: transparent;
+    color: var(--tp-danger);
+    --icon-stroke: currentColor;
+}
+.tp-ec-add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    margin-top: 10px;
+    font-weight: 600;
+    --icon-stroke: currentColor;
+}
+
+/* Footer */
+.tp-ec-footer {
+    width: 100%;
+}
+.tp-ec-totals {
+    margin-bottom: 8px;
+}
+.tp-ec-notice {
+    margin-bottom: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.tp-ec-notice:empty {
+    display: none;
+}
+.tp-ec-notice[data-kind="error"] {
+    color: var(--tp-danger);
+}
+.tp-ec-notice[data-kind="success"] {
+    color: var(--tp-success);
+}
+.tp-ec-notice[data-kind="info"] {
+    font-weight: 500;
+    color: var(--tp-text-muted);
+}
+.tp-ec-total-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    font-size: 14px;
+    color: var(--tp-text-main);
+}
+.tp-ec-total-line b {
+    font-size: 17px;
+}
+.tp-ec-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+.tp-ec-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    --icon-stroke: currentColor;
+}
+
+/* Phones and touch screens: 16px text (iOS Safari zooms into smaller fields) and controls
+   big enough for a finger; the two buttons share the footer's width */
+@media (max-width: 767.98px), (pointer: coarse) {
+    .tp-ec .form-control {
+        height: 44px;
+        font-size: 16px;
+    }
+    .tp-ec .tp-ec-datebox-text {
+        font-size: 16px;
+    }
+    .tp-ec-del {
+        min-height: 44px;
+    }
+    .tp-ec-add,
+    .tp-ec-actions .btn {
+        min-height: 44px;
+        font-size: 15px;
+    }
+    .tp-ec-actions .btn {
+        flex: 1 1 0;
+    }
+    .tp-ec-list-row td {
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+}
+@media (max-width: 575.98px) {
+    .tp-ec-dialog .modal-dialog {
+        margin: 8px;
+    }
+    .tp-ec-dialog .modal-content {
+        max-height: calc(100vh - 16px);
+        max-height: calc(100dvh - 16px);
+    }
+}
+/* The smallest phones (320px): a tighter body, and the expense type on its own line so its
+   name isn't cut off, with the amount and delete under it */
+@media (max-width: 359.98px) {
+    .tp-ec-dialog .modal-body,
+    .tp-ec-dialog .modal-footer {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+    .tp-ec-row,
+    .tp-ec-row.is-locked {
+        grid-template-columns: minmax(0, 1fr) 2.5rem;
+    }
+    .tp-ec-row .tp-ec-type {
+        grid-column: 1 / -1;
+    }
+    .tp-ec-row.is-locked .tp-ec-number {
+        grid-column: 1 / -1;
+    }
+    .tp-ec-actions .btn {
+        padding-left: 8px;
+        padding-right: 8px;
+        font-size: 14px;
     }
 }

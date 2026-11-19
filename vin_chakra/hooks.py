@@ -121,6 +121,10 @@ doc_events = {
 	},
 	"Employee": {
 		"validate": "vin_chakra.vin_chakra.custom.employee.validate_abbr"
+	},
+	"Expense Claim": {
+		"validate": "vin_chakra.technician_api.validate_expense_claim",
+		"on_cancel": "vin_chakra.technician_api.on_cancel_expense_claim"
 	}
 }
 
@@ -225,7 +229,7 @@ fixtures = [
     },
     {
         "dt": "Custom Field",
-        "filters": [
+        "or_filters": [
             ["dt", "in", [
                 "Customer",
                 "HD Ticket",
@@ -238,7 +242,10 @@ fixtures = [
                 "Sales Person",
                 "Sales Invoice",
                 "Sales Invoice Item"
-            ]]
+            ]],
+            # Only vin_chakra's own Expense Claim fields: the doctype also has India Compliance's
+            # company_gstin, which must stay with that app
+            ["name", "like", "Expense Claim-custom_%"]
         ]
     },
     {
