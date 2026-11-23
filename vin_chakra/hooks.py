@@ -269,7 +269,14 @@ fixtures = [
     {
         "dt": "Report",
         "filters": [
-            ["name", "in", ["Age-wise Quotation Report"]]
+            ["name", "in", ["Age-wise Quotation Report","Technician Dashboard report"]]
         ]
-    }
+    },
+    
+    {
+    "dt": "Print Format",
+    "filters": [
+        ["name", "=", "Expense Claim"]
+    ]
+}
 ]
