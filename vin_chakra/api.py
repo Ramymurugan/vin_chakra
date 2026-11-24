@@ -687,10 +687,11 @@ def get_customer_details(customer: str) -> dict:
 		return {"status": "error", "message": "Customer required"}
 	try:
 		cust = frappe.get_doc("Customer", customer)
+		primary_mobile = getattr(cust, "mobile_no", None) or getattr(cust, "mobile_number", None) or ""
 		data = {
 			"name": cust.name,
 			"customer_name": cust.customer_name or cust.name,
-			"mobile_no": getattr(cust, "mobile_no", None) or getattr(cust, "mobile_number", None) or "",
+			"mobile_no": str(primary_mobile).strip() if primary_mobile else "",
 			"email_id": getattr(cust, "email_id", None) or getattr(cust, "email_address", None) or "",
 			"secondary_phone": "",
 			"address_line1": "",
@@ -701,15 +702,7 @@ def get_customer_details(customer: str) -> dict:
 		sec_phones = []
 		cust_sec = getattr(cust, "custom_secondary_phone", None)
 		if cust_sec and str(cust_sec).strip():
-			sp = str(cust_sec).strip()
-			if sp not in sec_phones:
-				sec_phones.append(sp)
-
-		if hasattr(cust, "phone_nos") and cust.phone_nos:
-			for idx, r in enumerate(cust.phone_nos):
-				p = (r.phone or "").strip()
-				if p and p != data["mobile_no"] and p not in sec_phones:
-					sec_phones.append(p)
+			sec_phones.append(str(cust_sec).strip())
 
 		contact_name = getattr(cust, "customer_primary_contact", None)
 		if not contact_name:
@@ -726,10 +719,36 @@ def get_customer_details(customer: str) -> dict:
 			if hasattr(c_doc, "phone_nos") and c_doc.phone_nos:
 				for idx, r in enumerate(c_doc.phone_nos):
 					p = (r.phone or "").strip()
-					if p and p != data["mobile_no"] and p not in sec_phones:
-						sec_phones.append(p)
+					if p:
+						if not data["mobile_no"] and (r.is_primary_mobile_no or r.is_primary_phone):
+							data["mobile_no"] = p
+						else:
+							sec_phones.append(p)
+			if not data["mobile_no"] and c_doc.mobile_no:
+				data["mobile_no"] = c_doc.mobile_no.strip()
+			if c_doc.phone:
+				sec_phones.append(c_doc.phone.strip())
 
-		data["secondary_phone"] = ", ".join(sec_phones)
+		from vin_chakra.technician_api import _clean_phone_10, _format_display_phone
+
+		prim_10 = _clean_phone_10(data["mobile_no"])
+		if prim_10:
+			data["mobile_no"] = _format_display_phone(data["mobile_no"])
+
+		clean_sec_phones = []
+		seen_10 = {prim_10} if prim_10 else set()
+		for sp in sec_phones:
+			c10 = _clean_phone_10(sp)
+			if c10 and len(c10) == 10:
+				if c10 not in seen_10:
+					seen_10.add(c10)
+					clean_sec_phones.append(_format_display_phone(sp))
+			else:
+				raw = str(sp).strip()
+				if raw and raw not in clean_sec_phones and raw != data["mobile_no"]:
+					clean_sec_phones.append(raw)
+
+		data["secondary_phone"] = ", ".join(clean_sec_phones)
 
 		primary_addr = getattr(cust, "customer_primary_address", None)
 		if primary_addr and frappe.db.exists("Address", primary_addr):

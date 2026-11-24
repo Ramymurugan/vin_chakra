@@ -1,3 +1,5 @@
+import re
+
 import frappe
 from frappe import _
 from frappe.desk.form.assign_to import add as add_assign
@@ -13,8 +15,107 @@ def _is_technician(user=None):
 	return not ({"Agent Manager", "System Manager", "Chief Technician"} & set(roles))
 
 
+def sync_customer_details(doc):
+	"""
+	Keep HD Ticket synchronized with linked Customer master:
+	1. If customer link is missing, resolve it from custom_customer_name or phone.
+	2. If contact is mismatched (belongs to another customer or an employee),
+	   realign it with Customer's primary contact or linked contact.
+	3. Populate blank customer name, mobile, secondary phone, and address from Customer master.
+	"""
+	customer_name = doc.get("customer")
+	if not customer_name and doc.get("custom_customer_name"):
+		c_val = doc.get("custom_customer_name")
+		if frappe.db.exists("Customer", c_val):
+			customer_name = c_val
+		else:
+			customer_name = frappe.db.get_value("Customer", {"customer_name": c_val}, "name")
+		if customer_name:
+			doc.customer = customer_name
+
+	if not customer_name and doc.get("custom_customer_mobile_number"):
+		raw_digits = re.sub(r"\D", "", str(doc.get("custom_customer_mobile_number")))
+		c10 = raw_digits[-10:] if len(raw_digits) >= 10 else raw_digits
+		if len(c10) == 10:
+			customer_name = frappe.db.get_value("Customer", {"mobile_no": ["like", f"%{c10}%"]}, "name")
+			if customer_name:
+				doc.customer = customer_name
+
+	if not customer_name or not frappe.db.exists("Customer", customer_name):
+		return
+
+	cust_doc = frappe.db.get_value(
+		"Customer",
+		customer_name,
+		["name", "customer_name", "mobile_no", "custom_secondary_phone", "customer_primary_contact", "customer_primary_address"],
+		as_dict=True
+	)
+	if not cust_doc:
+		return
+
+	# Set customer name
+	if not doc.get("custom_customer_name"):
+		doc.custom_customer_name = cust_doc.customer_name or cust_doc.name
+
+	# Verify contact against Customer's valid contacts
+	primary_contact = cust_doc.get("customer_primary_contact")
+	valid_contacts = set(
+		frappe.get_all(
+			"Dynamic Link",
+			filters={"link_doctype": "Customer", "link_name": customer_name, "parenttype": "Contact"},
+			pluck="parent"
+		)
+	)
+	if primary_contact:
+		valid_contacts.add(primary_contact)
+
+	current_contact = doc.get("contact")
+	if current_contact not in valid_contacts:
+		# Mismatched or missing contact -> realign with customer's legitimate primary contact
+		doc.contact = primary_contact or (list(valid_contacts)[0] if valid_contacts else None)
+
+	# Set primary mobile
+	if not doc.get("custom_customer_mobile_number") and cust_doc.get("mobile_no"):
+		m = str(cust_doc.mobile_no).strip()
+		if m and not m.startswith("+"):
+			m = f"+91-{m}"
+		doc.custom_customer_mobile_number = m
+
+	# Set secondary mobile
+	if not doc.get("custom__secondary_phone_number") and cust_doc.get("custom_secondary_phone"):
+		sec_raw = str(cust_doc.custom_secondary_phone).strip()
+		sec_digits = re.sub(r"\D", "", sec_raw)[-10:]
+		prim_digits = re.sub(r"\D", "", str(cust_doc.mobile_no or doc.get("custom_customer_mobile_number") or ""))[-10:]
+		if sec_digits and sec_digits != prim_digits:
+			if sec_raw and not sec_raw.startswith("+"):
+				sec_raw = f"+91-{sec_raw}"
+			doc.custom__secondary_phone_number = sec_raw
+
+	# Set address
+	if not doc.get("custom_address"):
+		addr_id = cust_doc.get("customer_primary_address")
+		if not addr_id:
+			addr_links = frappe.get_all(
+				"Dynamic Link",
+				filters={"link_doctype": "Customer", "link_name": customer_name, "parenttype": "Address"},
+				pluck="parent"
+			)
+			if addr_links:
+				addr_id = addr_links[0]
+		if addr_id and frappe.db.exists("Address", addr_id):
+			addr = frappe.db.get_value("Address", addr_id, ["address_line1", "city", "state"], as_dict=True)
+			if addr:
+				doc.custom_address = addr.address_line1 or ""
+				if not doc.get("custom_city__district_"):
+					doc.custom_city__district_ = addr.city or ""
+				if not doc.get("custom_state"):
+					doc.custom_state = addr.state or ""
+
+
 def fix_phone_numbers(doc, method=None):
-	"""Ensure phone fields have a country code before Frappe strict validation runs."""
+	"""Ensure phone fields have a country code and customer details are aligned before validation."""
+	sync_customer_details(doc)
+
 	phone_fields = [df.fieldname for df in doc.meta.fields if df.fieldtype == "Phone"]
 	for field in phone_fields:
 		val = doc.get(field)
