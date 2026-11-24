@@ -605,7 +605,7 @@ class TechnicianPortal {
                 : (t.custom_machine_name || 'N/A');
 
             let is_resolved = t.status && t.status.trim().toLowerCase() === 'resolved';
-            let phone = t.custom_customer_mobile_number || t.primary_phone || t.custom__secondary_phone_number || '';
+            let phone = t.primary_phone || t.custom_customer_mobile_number || t.custom__secondary_phone_number || '';
             let invoice_btn = '';
             if (is_resolved) {
                 if (t.sales_invoice) {
@@ -673,7 +673,7 @@ class TechnicianPortal {
             let customer = t.custom_customer_name || t.customer || 'N/A';
             let address = [t.custom_address, t.custom_city__district_].filter(Boolean).join(', ') || 'N/A';
             let is_resolved = t.status && t.status.trim().toLowerCase() === 'resolved';
-            let phone = t.custom_customer_mobile_number || t.primary_phone || t.custom__secondary_phone_number || '';
+            let phone = t.primary_phone || t.custom_customer_mobile_number || t.custom__secondary_phone_number || '';
             let invoice_btn = '';
             if (is_resolved) {
                 if (t.sales_invoice) {
@@ -777,7 +777,7 @@ class TechnicianPortal {
                 let day_tickets = ticketsByDate[currentDay] || [];
                 let tickets_html = day_tickets.map(t => {
                     let is_res = t.status && t.status.trim().toLowerCase() === 'resolved';
-                    let phone = t.custom_customer_mobile_number || t.primary_phone || t.custom__secondary_phone_number || '';
+                    let phone = t.primary_phone || t.custom_customer_mobile_number || t.custom__secondary_phone_number || '';
                     let cal_inv_btn = is_res && this.can_create_invoice(t) ? `
                         <button class="btn btn-xs btn-success tp-btn-create-invoice" data-name="${t.name}" data-customer="${t.customer || t.custom_customer_name || ''}" data-phone="${phone}" style="font-size: 10px; padding: 1px 4px; margin-top: 2px; width: 100%; border-radius: 3px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 3px; background-color: #10b981; border-color: #10b981; color: white;" title="Create Invoice">
                             <i class="fa fa-file-text-o"></i> Create Invoice
@@ -861,6 +861,21 @@ class TechnicianPortal {
         if (!sec_phones.length && (t.custom__secondary_phone_number || t.custom_secondary_phone_number)) {
             sec_phones = [t.custom__secondary_phone_number || t.custom_secondary_phone_number];
         }
+        function clean10(p) {
+            if (!p) return '';
+            let d = String(p).replace(/\D/g, '');
+            if (d.length === 12 && d.startsWith('91')) return d.slice(2);
+            if (d.length === 11 && d.startsWith('0')) return d.slice(1);
+            return d.slice(-10);
+        }
+        let primClean = clean10(primary_phone);
+        let seenSec = new Set();
+        sec_phones = sec_phones.filter(p => {
+            let c = clean10(p);
+            if (!c || c === primClean || seenSec.has(c)) return false;
+            seenSec.add(c);
+            return true;
+        });
         let address = [t.custom_address, t.custom_city__district_, t.custom_state].filter(Boolean).join(', ') || '-';
         let date_str = t.custom_date ? frappe.datetime.global_date_format(t.custom_date) : '-';
 
@@ -1020,6 +1035,21 @@ class TechnicianPortal {
             if (!secondary_phones.length && (ticket_doc.custom__secondary_phone_number || ticket_doc.custom_secondary_phone_number)) {
                 secondary_phones = [ticket_doc.custom__secondary_phone_number || ticket_doc.custom_secondary_phone_number];
             }
+            function clean10(p) {
+                if (!p) return '';
+                let d = String(p).replace(/\D/g, '');
+                if (d.length === 12 && d.startsWith('91')) return d.slice(2);
+                if (d.length === 11 && d.startsWith('0')) return d.slice(1);
+                return d.slice(-10);
+            }
+            let primClean = clean10(primary_phone);
+            let seenSec = new Set();
+            secondary_phones = secondary_phones.filter(p => {
+                let c = clean10(p);
+                if (!c || c === primClean || seenSec.has(c)) return false;
+                seenSec.add(c);
+                return true;
+            });
 
             let title_text = is_resend ? `Resend Service OTP: ${ticket_doc.name}` : `Ticket Check-In & OTP Dispatch: ${ticket_doc.name}`;
             let prompt_text = is_resend ? `Select which mobile number to resend the Service OTP SMS to:` : `Select which mobile number to send the Service OTP SMS to upon check-in:`;

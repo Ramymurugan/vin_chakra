@@ -7,3 +7,4 @@
 vin_chakra.patches.seed_support_form_template
 vin_chakra.patches.remove_sales_invoice_custom_phone_number
 execute:from vin_chakra.technician_api import migrate_expense_claims_per_ticket; migrate_expense_claims_per_ticket()
+execute:from vin_chakra.technician_api import repair_ticket_customer_contacts; repair_ticket_customer_contacts()
