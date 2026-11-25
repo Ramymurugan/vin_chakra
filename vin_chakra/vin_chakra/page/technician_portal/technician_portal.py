@@ -427,8 +427,6 @@ def download_expense_claim_excel(
     frappe.response["type"] = "binary"
 
 
-<<<<<<< Updated upstream
-=======
 @frappe.whitelist(methods=["POST"])
 def get_expense_claim_print(
     ticket: str | None = None,
@@ -450,7 +448,7 @@ def get_export_sheets(user, employee, ticket, period, drafts):
     """Tickets to export. Only tickets with claimed expenses are kept."""
     tickets = [get_visited_ticket(user, ticket)] if ticket else get_visited_tickets(user, *period)
     claims = get_active_claims(employee, [t["name"] for t in tickets])  # one query for all tickets
-    sheets = [get_export_ticket(user, t, claims.get(t["name"]), drafts.get(t["name"])) for t in tickets]
+    sheets = [get_export_ticket(user, employee, t, drafts.get(t["name"])) for t in tickets]
     sheets = [v for v in sheets if flt(v.get("total")) > 0]
     if not sheets:
         frappe.throw(_("There are no claimed expenses to export."))
@@ -494,23 +492,6 @@ def print_form(v):
         "total": flt(sum(lines.values()), 2),
     }
 
-@frappe.whitelist(methods=["POST"])
-def get_expense_claim_print(
-    ticket: str | None = None, drafts: str | dict | None = None,
-    from_date: str | None = None, to_date: str | None = None,
-):
-    """Print: one "Staff Tour Settlement" form per claimed ticket. Never writes."""
-    user = require_login()
-    drafts = parse_dict(drafts, _("Unsaved changes"))
-    with read_only_transaction():
-        employee = get_employee(user, required=False)
-        period = None if ticket else get_list_period(from_date, to_date)
-        forms = [print_form(v) for v in get_export_sheets(user, employee, ticket, period, drafts)]
-    return {"employee_name": employee.employee_name if employee else get_fullname(user), "forms": forms}
-
-
-
->>>>>>> Stashed changes
 # --- Tickets and visits ------------------------------------------------------------------
 
 
@@ -1129,3 +1110,39 @@ def display_place(to_location):
     """The To Location to show. Claims saved by an earlier version can hold the check-in's
     "lat, lng"; those numbers are never shown (empty until the claim is saved again)."""
     return "" if POSITION.fullmatch(cstr(to_location)) else cstr(to_location)
+
+
+
+# Branch -> region. Branch names unga system-la irukkura exact name-ah check pannikko
+BRANCH_REGION = {
+    "Chennai Branch": "Chennai",
+    "Madurai Head Office": "Madurai",
+    "Showroom-Madurai": "Madurai",
+    "Dhalavaipuram": "Madurai",
+}
+
+
+def _region_branches(branch):
+    region = BRANCH_REGION.get(branch)
+    if not region:
+        return [branch] if branch else []
+    return [b for b, r in BRANCH_REGION.items() if r == region]
+
+
+@frappe.whitelist()
+def get_agents_by_branch(branch=None):
+    """HD Agents whose Employee branch is in the selected branch's region."""
+    branches = _region_branches(branch)
+    if not branches:
+        return []
+    return frappe.db.sql(
+        """
+        SELECT agent.name AS user, agent.agent_name, emp.branch
+        FROM `tabHD Agent` agent
+        JOIN `tabEmployee` emp ON emp.user_id = agent.user AND emp.status = 'Active'
+        WHERE emp.branch IN %(branches)s
+        ORDER BY agent.agent_name
+        """,
+        {"branches": tuple(branches)},
+        as_dict=True,
+    )

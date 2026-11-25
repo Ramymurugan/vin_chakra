@@ -1979,8 +1979,8 @@ class TechnicianExpenseClaim {
             total += amount || 0;
             let [kind, label] = draft && this.problems[t.name] ? ["problem", __("Needs attention")]
                 : draft ? ["unsaved", __("Unsaved")]
-                : claim ? [claim.locked ? "locked" : "draft", __(claim.status)]
-                : ["none", __("Not claimed")];
+                    : claim ? [claim.locked ? "locked" : "draft", __(claim.status)]
+                        : ["none", __("Not claimed")];
             return `
                 <tr class="tp-ec-list-row" data-ticket="${esc(t.name)}" tabindex="0" role="button">
                     <td>
@@ -1998,7 +1998,7 @@ class TechnicianExpenseClaim {
         let from = frappe.datetime.str_to_user(data.from_date), to = frappe.datetime.str_to_user(data.to_date);
         let empty = data.from_date !== data.to_date ? __("No customer visits from {0} to {1}", [from, to])
             : data.to_date === frappe.datetime.get_today() ? __("No customer visits today")
-            : __("No customer visits on {0}", [to]);
+                : __("No customer visits on {0}", [to]);
         this.$body.find(".tp-ec-list-wrap").html(`
             ${data.employee_missing ? `<div class="tp-ec-banner is-warning">${__("No active Employee is linked to your user, so you can't save Expense Claims. Please contact HR.")}</div>` : ""}
             <table class="table table-bordered tp-ec-list">
@@ -2507,7 +2507,7 @@ class TechnicianExpenseClaim {
         }
     }
 
-    share() {
+    export_args() {
         let drafts = {}, args;
         if (this.screen === "list") {
             if (!this.list || !this.list.tickets.length) return;
@@ -2530,9 +2530,6 @@ class TechnicianExpenseClaim {
             args = { ticket: this.ticket };
         }
         args.drafts = JSON.stringify(drafts);
-<<<<<<< Updated upstream
-        this.download(TP_EXPENSE_API + "download_expense_claim_excel", args);
-=======
         return args;
     }
 
@@ -2620,7 +2617,6 @@ class TechnicianExpenseClaim {
                 $.param({ doctype: "Expense Claim", name: JSON.stringify(names), ...q });
         }
         window.open(url, "_blank");
->>>>>>> Stashed changes
     }
 
     // POST and save the file; on an error show the server's message instead of leaving the page
@@ -2751,7 +2747,7 @@ class TechnicianExpenseClaim {
             setTimeout(() => e.target.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
         });
 
-        this.$footer.on("click", ".tp-ec-share", () => this.share());
+        this.$footer.on("click", ".tp-ec-share", () => this.export_documents());
         this.$footer.on("click", ".tp-ec-save", () => (this.screen === "list" ? this.save_all() : this.save_ticket()));
     }
 }

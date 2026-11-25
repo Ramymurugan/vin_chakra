@@ -71,6 +71,34 @@ def get_branch_filter(branch):
     return [branch]
 
 @frappe.whitelist()
+def technician_query(doctype, txt, searchfield, start, page_len, filters=None):
+    """Technician dropdown: users whose Employee record is in the chosen Branch
+    ("All <Region>" = every branch of that region). No Branch = all users, as before."""
+    if not (frappe.has_permission("HD Ticket", "read") and ("Chief Technician" in frappe.get_roles() or "System Manager" in frappe.get_roles())):
+        frappe.throw("You are not permitted to access this dashboard.")
+
+    filters = frappe.parse_json(filters) if isinstance(filters, str) else (filters or {})
+    branches = get_branch_filter(filters.get("branch") or None)
+
+    values = {"txt": f"%{txt}%", "start": int(start), "page_len": int(page_len)}
+    branch_join, branch_cond = "", ""
+    if branches:
+        branch_join = "JOIN `tabEmployee` e ON e.user_id = u.name AND e.status = 'Active'"
+        branch_cond = "AND e.branch IN %(branches)s"
+        values["branches"] = tuple(branches)
+
+    return frappe.db.sql(f"""
+        SELECT DISTINCT u.name, u.full_name
+        FROM `tabUser` u
+        {branch_join}
+        WHERE u.enabled = 1 AND u.name NOT IN ('Administrator', 'Guest')
+            AND (u.name LIKE %(txt)s OR u.full_name LIKE %(txt)s)
+            {branch_cond}
+        ORDER BY u.full_name
+        LIMIT %(start)s, %(page_len)s
+    """, values)
+
+@frappe.whitelist()
 def get_branch_options() -> dict:
     """The Branch filter's choices for the current user and the branch the dashboard opens on.
 
@@ -90,21 +118,49 @@ def get_branch_options() -> dict:
     else:
         default_branch = None
 
-        branch_list = allowed if allowed is not None else get_branches()
-
-    # Regions that have at least one branch the user can see
-    region_rows = frappe.get_all(
-        "Branch",
-        filters={"name": ["in", branch_list or [""]], REGION_FIELD: ["is", "set"]},
-        pluck=REGION_FIELD,
-        ignore_permissions=True,
-    )
+    branch_list = allowed if allowed is not None else get_branches()
 
     return {
         "branches": branch_list,
         "restricted": allowed is not None,
         "default_branch": default_branch,
     }
+
+@frappe.whitelist()
+def get_branch_agents(branch=None):
+    """Users who may be assigned to a ticket of `branch`: the active Employees of that branch's
+    region (a branch without a Region counts as its own region)."""
+    if not branch:
+        return []
+    region = frappe.db.get_value("Branch", branch, "custom_region")
+    if region:
+        branches = frappe.get_all("Branch", filters={"custom_region": region}, pluck="name")
+    else:
+        branches = [branch]
+    branches = [b for b in branches if not b.startswith("All ")]
+    return frappe.get_all(
+        "Employee",
+        filters={"branch": ["in", branches or [""]], "status": "Active", "user_id": ["is", "set"]},
+        pluck="user_id",
+    )
+
+
+def validate_ticket_assignee(doc, method=None):
+    """ToDo validate (hooks.py): a ticket can only be assigned to technicians of its branch's region."""
+    if doc.reference_type != "HD Ticket" or not doc.allocated_to or doc.status == "Cancelled":
+        return
+    # Managers and admins can be assigned to any ticket
+    if doc.allocated_to == "Administrator" or {"Agent Manager", "System Manager"} & set(frappe.get_roles(doc.allocated_to)):
+        return
+    branch = frappe.db.get_value("HD Ticket", doc.reference_name, "custom_branch")
+    if not branch:
+        return
+    if doc.allocated_to not in get_branch_agents(branch):
+        frappe.throw(
+            ("{0} is not a technician of Branch {1}, so they can't be assigned to this ticket.").format(
+                frappe.utils.get_fullname(doc.allocated_to), branch
+            )
+        )
 
 
 @frappe.whitelist()
